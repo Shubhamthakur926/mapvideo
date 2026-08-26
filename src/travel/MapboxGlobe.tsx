@@ -8,7 +8,7 @@ export const MAPBOX_TOKEN =
 type Props = {
   locations: Location[];
   legs?: Transport[];
-  progress?: number; // 0 to 1
+  progress?: number;
   activeLocation?: Location;
   playing?: boolean;
   className?: string;

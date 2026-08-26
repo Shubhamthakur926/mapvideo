@@ -1,4 +1,4 @@
-export type Transport = "flight" | "car" | "taxi" | "train" | "bicycle" | "bus" | "walking" | "ship";
+export type Transport = "flight" | "car" | "bike" | "taxi" | "train" | "bicycle" | "bus" | "walking" | "ship";
 
 export type Location = {
   id: string;
@@ -919,12 +919,13 @@ export const destinations: Location[] = [
 ];
 
 export const transportLabels: Record<Transport, string> = {
-  flight: "Flight",
-  car: "Car",
-  taxi: "Taxi",
-  train: "Train",
-  bicycle: "Bicycle",
-  bus: "Bus",
-  walking: "Walk",
-  ship: "Ship",
+  flight: "Flight ✈️",
+  car: "Car 🚗",
+  bike: "Bike 🏍️",
+  taxi: "Taxi 🚕",
+  train: "Train 🚆",
+  bus: "Bus 🚌",
+  bicycle: "Bicycle 🚲",
+  walking: "Walk 🚶",
+  ship: "Ship 🚢",
 };

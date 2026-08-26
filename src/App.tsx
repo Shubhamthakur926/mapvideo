@@ -9,6 +9,7 @@ const initialLocations: Location[] = [];
 
 const vehicleMarks: Record<Transport, string> = {
   car: "🚗",
+  bike: "🏍️",
   flight: "✈️",
   train: "🚆",
   taxi: "🚕",
@@ -50,7 +51,7 @@ export default function App() {
   const updateTransport = (index: number, transport: Transport) =>
     setLegs((value) => value.map((leg, current) => (current === index ? transport : leg)));
 
-  // Full HD 1080p Ultra-Clear Video Generator
+  // Full HD 1080p Mapbox 3D Globe Video Generator (Exact Preview Match)
   const generate = async () => {
     if (locations.length < 2) {
       setError("Please select at least 2 destinations to generate a video.");
@@ -60,38 +61,18 @@ export default function App() {
       setError("This browser does not support video downloads.");
       return;
     }
+
+    const mapboxCanvas = document.querySelector<HTMLCanvasElement>(".mapboxgl-canvas");
+    if (!mapboxCanvas) {
+      setError("Map canvas is loading. Please wait a moment and try again.");
+      return;
+    }
+
     setRendering(true);
     setError("");
 
     try {
-      // 1. Preload Earth texture
-      const earth = new Image();
-      earth.crossOrigin = "anonymous";
-      earth.src = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
-      await new Promise<void>((resolve) => {
-        earth.onload = () => resolve();
-        earth.onerror = () => resolve();
-      });
-
-      // 2. Preload Destination Images
-      const loadedImages = new Map<string, HTMLImageElement>();
-      await Promise.all(
-        locations.map((loc) => {
-          if (!loc.imageUrl) return Promise.resolve();
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.src = loc.imageUrl;
-          return new Promise<void>((resolve) => {
-            img.onload = () => {
-              loadedImages.set(loc.id, img);
-              resolve();
-            };
-            img.onerror = () => resolve();
-          });
-        })
-      );
-
-      // High Definition 1080x1080 Canvas
+      // 1080x1080 High Definition Composite Recording Canvas
       const canvas = document.createElement("canvas");
       canvas.width = 1080;
       canvas.height = 1080;
@@ -106,8 +87,7 @@ export default function App() {
           MediaRecorder.isTypeSupported(type)
         ) ?? "video/webm";
 
-      const numLegs = Math.max(1, locations.length - 1);
-      const length = 35 * 1000;
+      const length = 35 * 1000; // 35 seconds
       const started = performance.now();
 
       // 60 FPS recording with 12 Mbps bitrate for crystal-clear HD video
@@ -123,224 +103,48 @@ export default function App() {
         recorder.onerror = () => reject(new Error("Video rendering failed."));
       });
 
-      const project = (place: Location) => ({
-        x: 540 + (place.lng / 180) * 315,
-        y: 520 - (place.lat / 90) * 230,
-      });
-
       const draw = (elapsed: number) => {
         const progress = Math.min(elapsed / length, 0.999999);
-        const scaled = progress * numLegs;
-        const currentLeg = Math.floor(scaled);
-        const legProgress = scaled - currentLeg;
+        const curSec = Math.floor(progress * 35);
 
-        const fromLoc = locations[currentLeg];
-        const toLoc = locations[currentLeg + 1] || locations[locations.length - 1];
-        const fromPoint = project(fromLoc);
-        const toPoint = project(toLoc);
-        const currentTransport = legs[currentLeg] ?? "flight";
-        const vehicleEmoji = vehicleMarks[currentTransport] ?? "✈️";
-
-        const activeDisplayStop = legProgress < 0.25 ? fromLoc : toLoc;
-        const activePhoto = loadedImages.get(activeDisplayStop.id);
-
-        // Deep Space Gradient Background
-        const sky = context.createLinearGradient(0, 0, 1080, 1080);
-        sky.addColorStop(0, "#020712");
-        sky.addColorStop(0.55, "#082c4b");
-        sky.addColorStop(1, "#01050c");
-        context.fillStyle = sky;
-        context.fillRect(0, 0, 1080, 1080);
-
-        // Crisp Starfield
-        for (let index = 0; index < 120; index += 1) {
-          const x = (index * 137) % 1080;
-          const y = (index * 83) % 900;
-          context.fillStyle = `rgba(210,240,255,${0.25 + (index % 4) / 6})`;
-          context.fillRect(x, y, 1.5 + (index % 2), 1.5 + (index % 2));
-        }
-
-        // 3D Earth Globe Sphere
-        const radius = 378;
-        context.save();
-        context.beginPath();
-        context.arc(540, 520, radius, 0, Math.PI * 2);
-        context.clip();
-
-        if (earth.complete && earth.naturalWidth) {
-          const offset = (elapsed / 25) % 1080;
-          context.drawImage(earth, -offset, 144, 2160, 756);
-          context.drawImage(earth, 2160 - offset, 144, 2160, 756);
+        // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
+        const activeMapCanvas = document.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapboxCanvas;
+        if (activeMapCanvas && activeMapCanvas.width > 0 && activeMapCanvas.height > 0) {
+          context.drawImage(activeMapCanvas, 0, 0, 1080, 1080);
         } else {
-          const ocean = context.createRadialGradient(412, 375, 15, 540, 520, radius);
-          ocean.addColorStop(0, "#58b8dd");
-          ocean.addColorStop(1, "#062c59");
-          context.fillStyle = ocean;
-          context.fillRect(162, 144, 756, 756);
+          context.fillStyle = "#030e18";
+          context.fillRect(0, 0, 1080, 1080);
         }
 
-        // Atmospheric Shadow & 3D Shading
-        const shade = context.createRadialGradient(397, 345, 67, 645, 630, 495);
-        shade.addColorStop(0.45, "rgba(0,0,0,0)");
-        shade.addColorStop(1, "rgba(0,4,16,0.85)");
-        context.fillStyle = shade;
-        context.fillRect(162, 144, 756, 756);
-        context.restore();
-
-        // Atmospheric Blue Rim Glow
-        context.strokeStyle = "rgba(116,225,255,0.45)";
-        context.lineWidth = 3;
-        context.beginPath();
-        context.arc(540, 520, radius, 0, Math.PI * 2);
-        context.stroke();
-
-        // Draw Completed Trajectory Routes
-        for (let l = 0; l < currentLeg; l++) {
-          const p1 = project(locations[l]);
-          const p2 = project(locations[l + 1]);
-          context.strokeStyle = "#38bdf8";
-          context.lineWidth = 4.5;
-          context.beginPath();
-          context.moveTo(p1.x, p1.y);
-          context.quadraticCurveTo((p1.x + p2.x) / 2, Math.min(p1.y, p2.y) - 60, p2.x, p2.y);
-          context.stroke();
-        }
-
-        // Draw Current Leg Active Trajectory
-        const currentMidY = Math.min(fromPoint.y, toPoint.y) - 60;
-        const curX = fromPoint.x + (toPoint.x - fromPoint.x) * legProgress;
-        const curY =
-          fromPoint.y +
-          (toPoint.y - fromPoint.y) * legProgress -
-          (currentTransport === "flight" ? Math.sin(legProgress * Math.PI) * 65 : 0);
-
-        // Neon Glow Trail
-        context.strokeStyle = "#67e8f9";
-        context.lineWidth = 6;
-        context.shadowColor = "#06b6d4";
-        context.shadowBlur = 18;
-        context.beginPath();
-        context.moveTo(fromPoint.x, fromPoint.y);
-        context.quadraticCurveTo((fromPoint.x + curX) / 2, currentMidY, curX, curY);
-        context.stroke();
-        context.shadowBlur = 0;
-
-        // Draw Location Pins with Crisp Thumbnail Photos
-        locations.forEach((place, index) => {
-          const point = project(place);
-          const isVisited = index <= currentLeg;
-          const isCurrent = place.id === activeDisplayStop.id;
-
-          context.fillStyle = isCurrent ? "#ffffff" : isVisited ? "#38bdf8" : "rgba(148,163,184,0.6)";
-          context.beginPath();
-          context.arc(point.x, point.y, isCurrent ? 11 : 7, 0, Math.PI * 2);
-          context.fill();
-
-          // Mini Photo Pin on Map
-          const thumb = loadedImages.get(place.id);
-          if (thumb && thumb.complete && thumb.naturalWidth) {
-            context.save();
-            context.beginPath();
-            context.arc(point.x, point.y - 26, 18, 0, Math.PI * 2);
-            context.clip();
-            context.drawImage(thumb, point.x - 18, point.y - 44, 36, 36);
-            context.restore();
-
-            context.strokeStyle = isCurrent ? "#38bdf8" : "#ffffff";
-            context.lineWidth = 2.5;
-            context.beginPath();
-            context.arc(point.x, point.y - 26, 18, 0, Math.PI * 2);
-            context.stroke();
-          }
-        });
-
-        // Draw Moving Vehicle Emoji along its path
-        context.font = "48px system-ui, sans-serif";
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.shadowColor = "rgba(0,0,0,0.8)";
-        context.shadowBlur = 10;
-        context.fillText(vehicleEmoji, curX, curY);
-        context.shadowBlur = 0;
-
-        // Ultra-Clear Arrival Landmark Photo Card Popup (Top Left)
-        if (activePhoto && activePhoto.complete && activePhoto.naturalWidth) {
-          context.save();
-          const cardX = 45;
-          const cardY = 110;
-          const cardW = 390;
-          const cardH = 105;
-          const cardRadius = 22;
-
-          // Glassmorphism Card
-          context.fillStyle = "rgba(3, 16, 29, 0.94)";
-          context.strokeStyle = "rgba(56, 189, 248, 0.7)";
-          context.lineWidth = 2;
-          context.shadowColor = "rgba(0,0,0,0.7)";
-          context.shadowBlur = 20;
-
-          context.beginPath();
-          context.roundRect(cardX, cardY, cardW, cardH, cardRadius);
-          context.fill();
-          context.stroke();
-          context.shadowBlur = 0;
-
-          // High Resolution Destination Photo
-          context.save();
-          context.beginPath();
-          context.roundRect(cardX + 14, cardY + 14, 76, 76, 14);
-          context.clip();
-          context.drawImage(activePhoto, cardX + 14, cardY + 14, 76, 76);
-          context.restore();
-
-          // Border around photo
-          context.strokeStyle = "#ffffff";
-          context.lineWidth = 2;
-          context.beginPath();
-          context.roundRect(cardX + 14, cardY + 14, 76, 76, 14);
-          context.stroke();
-
-          // Destination Text
-          context.textAlign = "left";
-          context.textBaseline = "top";
-          context.fillStyle = "#38bdf8";
-          context.font = "800 13px system-ui, sans-serif";
-          context.fillText(
-            legProgress < 0.25 ? "📍 DEPARTING STOP" : "🎯 DESTINATION ARRIVAL",
-            cardX + 105,
-            cardY + 18
-          );
-
-          context.fillStyle = "#ffffff";
-          context.font = "700 20px Georgia, serif";
-          context.fillText(activeDisplayStop.name.slice(0, 20), cardX + 105, cardY + 38);
-
-          context.fillStyle = "#94a3b8";
-          context.font = "600 14px system-ui, sans-serif";
-          context.fillText(`${activeDisplayStop.country} · ${activeDisplayStop.code}`, cardX + 105, cardY + 68);
-
-          context.restore();
-        }
-
-        // Top & Bottom Cinematic Typography
+        // 2. Cinematic Video Frame Header & Progress
+        context.save();
         context.textAlign = "center";
         context.textBaseline = "alphabetic";
-        context.fillStyle = "#bdeaff";
-        context.font = "800 20px system-ui, sans-serif";
-        context.letterSpacing = "3px";
-        context.fillText("ROAMLY · CINEMATIC JOURNEY", 540, 70);
-
         context.fillStyle = "#ffffff";
-        context.font = "700 48px Georgia, serif";
-        context.fillText(`${locations[0].name} → ${end?.name || ""}`, 540, 990);
-
-        context.fillStyle = "#93c5fd";
-        context.font = "600 22px system-ui, sans-serif";
+        context.font = "700 32px Georgia, serif";
+        context.shadowColor = "rgba(0,0,0,0.85)";
+        context.shadowBlur = 14;
         context.fillText(
-          `${fromLoc.name} to ${toLoc.name} (${currentTransport.toUpperCase()})  ·  LEG ${currentLeg + 1} OF ${numLegs}`,
+          `${locations[0].name} → ${end?.name || locations[locations.length - 1].name}`,
           540,
-          1035
+          995
         );
+
+        context.fillStyle = "#38bdf8";
+        context.font = "700 15px system-ui, sans-serif";
+        context.fillText(
+          `0:${curSec < 10 ? "0" : ""}${curSec} / 0:35 · 1080p HD JOURNEY STORY`,
+          540,
+          1028
+        );
+        context.shadowBlur = 0;
+
+        // Bottom Progress Bar
+        context.fillStyle = "rgba(255,255,255,0.2)";
+        context.fillRect(60, 1052, 960, 4);
+        context.fillStyle = "#38bdf8";
+        context.fillRect(60, 1052, 960 * progress, 4);
+        context.restore();
       };
 
       recorder.start();
@@ -362,11 +166,14 @@ export default function App() {
       const url = URL.createObjectURL(await video);
       const link = document.createElement("a");
       link.href = url;
-      const endName = end?.name ? end.name.toLowerCase() : "destination";
-      link.download = `${locations[0].name.toLowerCase()}-to-${endName}-hd-journey.${
+      const endName = end?.name ? end.name.toLowerCase().replace(/\s+/g, "-") : "destination";
+      const startName = locations[0]?.name ? locations[0].name.toLowerCase().replace(/\s+/g, "-") : "start";
+      link.download = `roamly-${startName}-to-${endName}-3d-journey.${
         mime.startsWith("video/mp4") ? "mp4" : "webm"
       }`;
+      document.body.appendChild(link);
       link.click();
+      link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Video rendering failed.");

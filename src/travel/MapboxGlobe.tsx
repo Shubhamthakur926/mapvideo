@@ -17,6 +17,7 @@ type Props = {
 
 const vehicleMarks: Record<Transport, string> = {
   car: "🚗",
+  bike: "🏍️",
   flight: "✈️",
   train: "🚆",
   taxi: "🚕",
@@ -86,17 +87,193 @@ function generateCurvedRoadCoordinates(start: Location, end: Location, segments 
   return coords;
 }
 
+// Global Maritime Nautical Waypoint Graph (100% Water / Sea-Lanes)
+const SEA_NODES: Record<string, { lng: number; lat: number; neighbors: string[] }> = {
+  // Indian Ocean & South Asia
+  colombo_offshore: { lng: 79.7, lat: 6.8, neighbors: ["sri_lanka_south", "mumbai_offshore", "bay_bengal_mid"] },
+  sri_lanka_south: { lng: 80.5, lat: 5.7, neighbors: ["colombo_offshore", "andaman_south", "bay_bengal_mid", "arabian_sea_mid"] },
+  mumbai_offshore: { lng: 71.5, lat: 18.5, neighbors: ["colombo_offshore", "arabian_sea_mid", "hormuz_strait"] },
+  arabian_sea_mid: { lng: 64.0, lat: 14.0, neighbors: ["sri_lanka_south", "mumbai_offshore", "gulf_of_aden", "hormuz_strait"] },
+  hormuz_strait: { lng: 56.5, lat: 26.2, neighbors: ["mumbai_offshore", "arabian_sea_mid", "dubai_offshore"] },
+  dubai_offshore: { lng: 55.1, lat: 25.4, neighbors: ["hormuz_strait"] },
+  gulf_of_aden: { lng: 48.0, lat: 12.5, neighbors: ["arabian_sea_mid", "bab_el_mandeb"] },
+  bab_el_mandeb: { lng: 43.4, lat: 12.6, neighbors: ["gulf_of_aden", "red_sea_mid"] },
+  red_sea_mid: { lng: 37.5, lat: 21.0, neighbors: ["bab_el_mandeb", "suez_south"] },
+  suez_south: { lng: 32.55, lat: 29.95, neighbors: ["red_sea_mid", "suez_north"] },
+  suez_north: { lng: 32.35, lat: 31.25, neighbors: ["suez_south", "med_east"] },
+
+  // Mediterranean & Europe
+  med_east: { lng: 28.0, lat: 34.0, neighbors: ["suez_north", "med_mid", "athens_offshore"] },
+  athens_offshore: { lng: 23.8, lat: 37.5, neighbors: ["med_east", "med_mid"] },
+  med_mid: { lng: 15.0, lat: 36.0, neighbors: ["med_east", "athens_offshore", "rome_offshore", "med_west"] },
+  rome_offshore: { lng: 12.0, lat: 41.5, neighbors: ["med_mid", "med_west"] },
+  med_west: { lng: 4.0, lat: 38.0, neighbors: ["med_mid", "rome_offshore", "barcelona_offshore", "gibraltar"] },
+  barcelona_offshore: { lng: 2.3, lat: 41.3, neighbors: ["med_west", "gibraltar"] },
+  gibraltar: { lng: -5.6, lat: 36.0, neighbors: ["med_west", "barcelona_offshore", "portugal_coast", "atlantic_mid"] },
+
+  // Atlantic & North Sea
+  portugal_coast: { lng: -9.8, lat: 38.7, neighbors: ["gibraltar", "biscay_offshore", "atlantic_mid"] },
+  biscay_offshore: { lng: -6.0, lat: 45.0, neighbors: ["portugal_coast", "english_channel"] },
+  english_channel: { lng: -1.5, lat: 50.0, neighbors: ["biscay_offshore", "dover_strait", "atlantic_north_east"] },
+  dover_strait: { lng: 1.5, lat: 51.1, neighbors: ["english_channel", "north_sea"] },
+  north_sea: { lng: 3.5, lat: 54.0, neighbors: ["dover_strait", "atlantic_north_east"] },
+  atlantic_north_east: { lng: -12.0, lat: 52.0, neighbors: ["english_channel", "north_sea", "atlantic_mid"] },
+  atlantic_mid: { lng: -35.0, lat: 36.0, neighbors: ["atlantic_north_east", "gibraltar", "portugal_coast", "us_east_coast", "caribbean_east"] },
+
+  // Americas
+  us_east_coast: { lng: -73.0, lat: 39.0, neighbors: ["atlantic_mid", "florida_strait"] },
+  florida_strait: { lng: -80.0, lat: 25.0, neighbors: ["us_east_coast", "caribbean_east", "caribbean_west"] },
+  caribbean_east: { lng: -65.0, lat: 18.0, neighbors: ["atlantic_mid", "florida_strait", "caribbean_west"] },
+  caribbean_west: { lng: -78.0, lat: 12.0, neighbors: ["caribbean_east", "florida_strait", "panama_caribbean"] },
+  panama_caribbean: { lng: -79.9, lat: 9.35, neighbors: ["caribbean_west", "panama_pacific"] },
+  panama_pacific: { lng: -79.5, lat: 8.8, neighbors: ["panama_caribbean", "pacific_mexico", "pacific_mid"] },
+  pacific_mexico: { lng: -105.0, lat: 18.0, neighbors: ["panama_pacific", "us_west_coast_la"] },
+  us_west_coast_la: { lng: -118.5, lat: 33.7, neighbors: ["pacific_mexico", "us_west_coast_sf", "pacific_mid"] },
+  us_west_coast_sf: { lng: -123.0, lat: 37.5, neighbors: ["us_west_coast_la", "pacific_north"] },
+
+  // Southeast Asia & East Asia
+  bay_bengal_mid: { lng: 88.0, lat: 12.0, neighbors: ["colombo_offshore", "sri_lanka_south", "andaman_south"] },
+  andaman_south: { lng: 95.5, lat: 5.8, neighbors: ["sri_lanka_south", "bay_bengal_mid", "malacca_mid"] },
+  malacca_mid: { lng: 100.5, lat: 3.2, neighbors: ["andaman_south", "singapore_strait"] },
+  singapore_strait: { lng: 103.85, lat: 1.25, neighbors: ["malacca_mid", "south_china_sea_south", "java_sea"] },
+  java_sea: { lng: 110.0, lat: -5.0, neighbors: ["singapore_strait", "australia_north"] },
+  australia_north: { lng: 130.0, lat: -10.0, neighbors: ["java_sea", "sydney_offshore"] },
+  sydney_offshore: { lng: 152.5, lat: -34.0, neighbors: ["australia_north", "pacific_mid"] },
+
+  south_china_sea_south: { lng: 106.5, lat: 4.5, neighbors: ["singapore_strait", "south_china_sea_mid"] },
+  south_china_sea_mid: { lng: 112.5, lat: 12.5, neighbors: ["south_china_sea_south", "south_china_sea_north", "luzon_strait"] },
+  south_china_sea_north: { lng: 115.0, lat: 19.5, neighbors: ["south_china_sea_mid", "hong_kong_offshore", "taiwan_strait"] },
+  hong_kong_offshore: { lng: 114.5, lat: 21.8, neighbors: ["south_china_sea_north", "taiwan_strait"] },
+  taiwan_strait: { lng: 119.5, lat: 24.0, neighbors: ["hong_kong_offshore", "south_china_sea_north", "east_china_sea"] },
+  luzon_strait: { lng: 121.5, lat: 20.5, neighbors: ["south_china_sea_mid", "east_china_sea", "philippine_sea"] },
+  east_china_sea: { lng: 124.5, lat: 28.5, neighbors: ["taiwan_strait", "luzon_strait", "shanghai_offshore", "korea_strait", "japan_south"] },
+  shanghai_offshore: { lng: 122.5, lat: 31.0, neighbors: ["east_china_sea", "korea_strait"] },
+  korea_strait: { lng: 129.5, lat: 34.0, neighbors: ["east_china_sea", "shanghai_offshore", "japan_south"] },
+  philippine_sea: { lng: 130.0, lat: 22.0, neighbors: ["luzon_strait", "japan_south", "pacific_mid"] },
+  japan_south: { lng: 136.0, lat: 33.0, neighbors: ["east_china_sea", "korea_strait", "philippine_sea", "tokyo_bay_entry"] },
+  tokyo_bay_entry: { lng: 139.75, lat: 35.0, neighbors: ["japan_south", "pacific_north", "pacific_mid"] },
+  pacific_north: { lng: 160.0, lat: 40.0, neighbors: ["tokyo_bay_entry", "us_west_coast_sf"] },
+  pacific_mid: { lng: -160.0, lat: 20.0, neighbors: ["tokyo_bay_entry", "philippine_sea", "us_west_coast_la", "panama_pacific", "sydney_offshore"] },
+};
+
+function findClosestSeaNode(loc: Location): string {
+  let closestId = "colombo_offshore";
+  let minDistance = Infinity;
+
+  for (const [id, node] of Object.entries(SEA_NODES)) {
+    const dist = Math.hypot(node.lng - loc.lng, node.lat - loc.lat);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestId = id;
+    }
+  }
+  return closestId;
+}
+
+function findSeaPath(startNodeId: string, endNodeId: string): [number, number][] {
+  if (startNodeId === endNodeId) {
+    return [[SEA_NODES[startNodeId].lng, SEA_NODES[startNodeId].lat]];
+  }
+
+  // BFS Shortest Path Search across Maritime Graph
+  const queue: Array<{ id: string; path: string[] }> = [{ id: startNodeId, path: [startNodeId] }];
+  const visited = new Set<string>([startNodeId]);
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.id === endNodeId) {
+      return current.path.map((nodeId) => [SEA_NODES[nodeId].lng, SEA_NODES[nodeId].lat]);
+    }
+
+    const neighbors = SEA_NODES[current.id]?.neighbors || [];
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor) && SEA_NODES[neighbor]) {
+        visited.add(neighbor);
+        queue.push({ id: neighbor, path: [...current.path, neighbor] });
+      }
+    }
+  }
+
+  return [
+    [SEA_NODES[startNodeId].lng, SEA_NODES[startNodeId].lat],
+    [SEA_NODES[endNodeId].lng, SEA_NODES[endNodeId].lat],
+  ];
+}
+
+function generateNauticalSeaRoute(start: Location, end: Location, segments = 100): [number, number][] {
+  const startNodeId = findClosestSeaNode(start);
+  const endNodeId = findClosestSeaNode(end);
+
+  const seaWaypoints = findSeaPath(startNodeId, endNodeId);
+  const fullWaypoints: [number, number][] = [[start.lng, start.lat], ...seaWaypoints, [end.lng, end.lat]];
+
+  // Smooth Catmull-Rom spline interpolation along nautical sea lanes
+  const result: [number, number][] = [];
+  const totalWaypoints = fullWaypoints.length;
+  const totalLegs = totalWaypoints - 1;
+  const segsPerLeg = Math.max(8, Math.round(segments / totalLegs));
+
+  for (let i = 0; i < totalLegs; i++) {
+    const p0 = fullWaypoints[Math.max(0, i - 1)];
+    const p1 = fullWaypoints[i];
+    const p2 = fullWaypoints[i + 1];
+    const p3 = fullWaypoints[Math.min(totalLegs, i + 2)];
+
+    for (let s = i === 0 ? 0 : 1; s <= segsPerLeg; s++) {
+      const t = s / segsPerLeg;
+      const t2 = t * t;
+      const t3 = t2 * t;
+
+      const lng =
+        0.5 *
+        (2 * p1[0] +
+          (-p0[0] + p2[0]) * t +
+          (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+          (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+
+      const lat =
+        0.5 *
+        (2 * p1[1] +
+          (-p0[1] + p2[1]) * t +
+          (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+          (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+
+      result.push([lng, lat]);
+    }
+  }
+
+  return result;
+}
+
+function getLegCoordinates(
+  start: Location,
+  end: Location,
+  transport: Transport,
+  cached?: [number, number][]
+): [number, number][] {
+  if (transport === "flight") {
+    return generateArcCoordinates(start, end, 60);
+  }
+  if (transport === "ship") {
+    return generateNauticalSeaRoute(start, end, 100);
+  }
+  return cached || generateCurvedRoadCoordinates(start, end, 60);
+}
+
 const directionsCache = new Map<string, [number, number][]>();
 
 async function fetchLegRoute(start: Location, end: Location, transport: Transport): Promise<[number, number][]> {
   if (transport === "flight") {
     return generateArcCoordinates(start, end, 60);
   }
+  if (transport === "ship") {
+    return generateNauticalSeaRoute(start, end, 100);
+  }
 
   const profile =
     transport === "walking"
       ? "mapbox/walking"
-      : transport === "bicycle"
+      : transport === "bicycle" || transport === "bike"
       ? "mapbox/cycling"
       : "mapbox/driving";
 
@@ -244,27 +421,41 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
       };
     } else if (dist >= 1000) {
       return {
-        zoom: 4.3 - arc * 1.1, // 4.3 -> 3.2
+        zoom: 4.6 - arc * 1.1, // 4.6 -> 3.5
         pitch: 40 - arc * 6,   // 40° -> 34°
       };
-    } else {
+    } else if (dist >= 300) {
       return {
-        zoom: 4.8 - arc * 0.8, // 4.8 -> 4.0
+        zoom: 5.6 - arc * 0.8, // 5.6 -> 4.8
         pitch: 42 - arc * 5,   // 42° -> 37°
+      };
+    } else {
+      // Short domestic flight hop
+      return {
+        zoom: 6.8 - arc * 0.6, // 6.8 -> 6.2
+        pitch: 44 - arc * 4,
       };
     }
   }
 
-  // Overland / Surface Transports (Train, Car, Bus, Ship, etc.)
-  if (dist >= 2000) {
-    return { zoom: 3.4, pitch: 35 };
-  } else if (dist >= 600) {
-    return { zoom: 4.2, pitch: 38 };
+  // Overland / Surface Transports (Bike, Car, Taxi, Train, Bus, Bicycle, Walking, Ship)
+  if (dist >= 2500) {
+    return { zoom: 3.5, pitch: 35 };
+  } else if (dist >= 1200) {
+    return { zoom: 4.4, pitch: 38 };
+  } else if (dist >= 500) {
+    return { zoom: 5.3, pitch: 40 };
   } else if (dist >= 150) {
-    return { zoom: 4.8, pitch: 40 };
+    return { zoom: 6.5, pitch: 44 };
+  } else if (dist >= 50) {
+    // Inter-city / state highway travel (50km - 150km)
+    return { zoom: 8.0, pitch: 48 };
+  } else if (dist >= 15) {
+    // City / suburban travel (15km - 50km)
+    return { zoom: 9.8, pitch: 50 };
   } else {
-    // Local / city travel - clear road level
-    return { zoom: 5.3, pitch: 42 };
+    // Close / intra-city / street-level travel (< 15km)
+    return { zoom: 11.8, pitch: 52 };
   }
 }
 
@@ -289,21 +480,17 @@ export function MapboxGlobe({
   const totalLegs = Math.max(1, locations.length - 1);
   const currentProgress = externalProgress !== undefined ? externalProgress : internalProgress;
 
-  // Real road coordinates for all legs
+  // Coordinates for all legs (Roads, Sea-lanes, or Flight Arcs)
   const [legRoutes, setLegRoutes] = useState<[number, number][][]>(() => {
     const initial: [number, number][][] = [];
     for (let i = 0; i < locations.length - 1; i++) {
       const tr = legs[i] ?? "flight";
-      if (tr === "flight") {
-        initial.push(generateArcCoordinates(locations[i], locations[i + 1], 50));
-      } else {
-        initial.push(generateCurvedRoadCoordinates(locations[i], locations[i + 1], 50));
-      }
+      initial.push(getLegCoordinates(locations[i], locations[i + 1], tr));
     }
     return initial;
   });
 
-  // Fetch real road turn-by-turn geometry
+  // Fetch real road turn-by-turn geometry & sea-lanes
   useEffect(() => {
     let active = true;
     const fetchAllRoutes = async () => {
@@ -322,7 +509,7 @@ export function MapboxGlobe({
     };
   }, [locations, legs]);
 
-  // Active leg & destination stop computation along real roads
+  // Active leg & destination stop computation along real roads / sea / sky
   const { currentPoint, currentMark, currentStop, activeLegIndex, legFraction, bearing, transport, currentStart, currentEnd } = useMemo(() => {
     if (locations.length < 2) {
       return {
@@ -347,9 +534,7 @@ export function MapboxGlobe({
     const curTransport = legs[legIdx] ?? "flight";
     const mark = vehicleMarks[curTransport] ?? "✈️";
 
-    const coords = legRoutes[legIdx] || (curTransport === "flight"
-      ? generateArcCoordinates(start, end, 50)
-      : generateCurvedRoadCoordinates(start, end, 50));
+    const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
 
     const { pt: point, bearing: calculatedBearing } = getPointAlongPolyline(coords, fraction);
     const activeDisplayStop = fraction < 0.3 ? start : end;
@@ -384,7 +569,8 @@ export function MapboxGlobe({
       pitch: 38,
       bearing: 0,
       antialias: true,
-      maxZoom: 9,
+      preserveDrawingBuffer: true,
+      maxZoom: 12,
       renderWorldCopies: false,
     });
 
@@ -561,9 +747,7 @@ export function MapboxGlobe({
     if (baseSource) {
       const fullRouteFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
       for (let i = 0; i < locations.length - 1; i++) {
-        const coords = legRoutes[i] || (legs[i] === "flight"
-          ? generateArcCoordinates(locations[i], locations[i + 1], 50)
-          : generateCurvedRoadCoordinates(locations[i], locations[i + 1], 50));
+        const coords = legRoutes[i] || getLegCoordinates(locations[i], locations[i + 1], legs[i] ?? "flight");
 
         fullRouteFeatures.push({
           type: "Feature",
@@ -581,7 +765,7 @@ export function MapboxGlobe({
     }
   }, [locations, mapLoaded, legRoutes, legs]);
 
-  // Update Active Route Path GeoJSON as vehicle travels along real roads
+  // Update Active Route Path GeoJSON as vehicle travels along real roads / sea / sky
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || locations.length < 2) return;
@@ -593,9 +777,7 @@ export function MapboxGlobe({
 
     // Full coordinates for all completed past legs
     for (let i = 0; i < activeLegIndex; i++) {
-      const pastCoords = legRoutes[i] || (legs[i] === "flight"
-        ? generateArcCoordinates(locations[i], locations[i + 1], 50)
-        : generateCurvedRoadCoordinates(locations[i], locations[i + 1], 50));
+      const pastCoords = legRoutes[i] || getLegCoordinates(locations[i], locations[i + 1], legs[i] ?? "flight");
 
       activeFeatures.push({
         type: "Feature",
@@ -607,11 +789,15 @@ export function MapboxGlobe({
       });
     }
 
-    // Partial road coordinates for the current active leg up to vehicle position
+    // Partial road/sea/sky coordinates for the current active leg up to vehicle position
     if (locations[activeLegIndex] && locations[activeLegIndex + 1]) {
-      const curCoords = legRoutes[activeLegIndex] || (legs[activeLegIndex] === "flight"
-        ? generateArcCoordinates(locations[activeLegIndex], locations[activeLegIndex + 1], 50)
-        : generateCurvedRoadCoordinates(locations[activeLegIndex], locations[activeLegIndex + 1], 50));
+      const curCoords =
+        legRoutes[activeLegIndex] ||
+        getLegCoordinates(
+          locations[activeLegIndex],
+          locations[activeLegIndex + 1],
+          legs[activeLegIndex] ?? "flight"
+        );
 
       const partialCoords = getPolylineUpTo(curCoords, legFraction);
       if (partialCoords.length > 1) {

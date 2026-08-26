@@ -14,6 +14,7 @@ type Props = {
 
 const vehicleMarks: Record<Transport, string> = {
   car: "🚗",
+  bike: "🏍️",
   flight: "✈️",
   train: "🚆",
   taxi: "🚕",

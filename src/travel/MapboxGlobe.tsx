@@ -3,8 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Location, Transport } from "./types";
 
 export const MAPBOX_TOKEN =
-  (import.meta as { env?: { VITE_MAPBOX_TOKEN?: string } }).env?.VITE_MAPBOX_TOKEN ||
-  "pk.eyJ1Ijoic2h1YmhhbTk5OTk5OSIsImEiOiJjbTdtbWpnN2UwOTJqMm1zZjVreWRpdjM2In0.o67r_j7t81j7b6x9g3b3tQ";
+  (import.meta as { env?: { VITE_MAPBOX_TOKEN?: string } }).env?.VITE_MAPBOX_TOKEN;
 
 type Props = {
   locations: Location[];

@@ -1,0 +1,45 @@
+.map-video-modal {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+.map-video {
+  position: relative;
+  overflow: hidden;
+  width: min(840px, 94vw);
+  height: min(86vh, 800px);
+  border-radius: 24px;
+  background: #071c2a;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.95);
+  cursor: default;
+}
+.map-video-globe {
+  position: absolute;
+  inset: 0;
+}
+.map-video .close-video-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(3, 16, 29, 0.88);
+  backdrop-filter: blur(10px);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  transition: all 0.2s ease;
+}
+.map-video .close-video-button:hover {
+  background: rgba(239, 68, 68, 0.9);
+  border-color: #ef4444;
+  transform: scale(1.1);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.8);
+}

@@ -162,7 +162,18 @@ export function PreviewModal({
   
   const totalLegs = Math.max(1, locations.length - 1);
   const totalDuration = duration * 1000;
+  const totalTripDistance = useMemo(
+    () =>
+      formatDistanceKm(
+        locations.slice(1).reduce(
+          (total, destination, index) => total + calculateDistanceKm(locations[index], destination),
+          0
+        )
+      ),
+    [locations]
+  );
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
+  const currentTransport = legs[currentLegIndex] ?? "flight";
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
   const elapsedSec = Math.min(35, Math.floor((internalProgress / 100) * 35));
 

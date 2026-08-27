@@ -554,7 +554,7 @@ export function MapboxGlobe({
 
   // Initialize Mapbox 3D Globe
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    if (!mapContainerRef.current || !MAPBOX_TOKEN) return;
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
@@ -1017,6 +1017,26 @@ export function MapboxGlobe({
           height: "100%",
         }}
       />
+
+      {!MAPBOX_TOKEN && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            padding: "24px",
+            color: "#dbeafe",
+            textAlign: "center",
+            background: "radial-gradient(circle at center, rgba(8, 47, 73, 0.9), #030e18 70%)",
+          }}
+        >
+          <div>
+            <strong style={{ display: "block", fontSize: "18px", marginBottom: "8px" }}>Map preview unavailable</strong>
+            <span style={{ color: "#93c5fd", fontSize: "13px" }}>Add VITE_MAPBOX_TOKEN to a .env file to enable the 3D globe.</span>
+          </div>
+        </div>
+      )}
 
       {/* Map Style Selector */}
       <div

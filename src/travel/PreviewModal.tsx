@@ -30,7 +30,6 @@ const vehicleSounds: Record<Transport, string> = {
 };
 
 const VEHICLE_VOLUME = 0.6;
-const JOURNEY_DURATION_MS = 35 * 1000;
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
 function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
@@ -153,7 +152,7 @@ export function PreviewModal({
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(false);
   const [internalProgress, setInternalProgress] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [recording, setRecording] = useState(false);
@@ -175,7 +174,7 @@ export function PreviewModal({
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
   const currentTransport = legs[currentLegIndex] ?? "flight";
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
-  const elapsedSec = Math.min(35, Math.floor((internalProgress / 100) * 35));
+  const elapsedSec = Math.min(duration, Math.floor((internalProgress / 100) * duration));
 
   // Close on Escape key press
   useEffect(() => {
@@ -233,6 +232,18 @@ export function PreviewModal({
     setInternalProgress(0);
     setRestartKey((value) => value + 1);
     setPlaying(true);
+    if (audioRef.current) playPreviewAudio(audioRef.current);
+  };
+
+  const togglePlayback = () => {
+    if (recording) return;
+    if (playing) {
+      setPlaying(false);
+      audioRef.current?.pause();
+    } else {
+      setPlaying(true);
+      if (audioRef.current) playPreviewAudio(audioRef.current);
+    }
   };
 
   const fullscreen = () => frame.current?.requestFullscreen?.().catch(() => undefined);
@@ -277,8 +288,9 @@ export function PreviewModal({
     const canvasStream = canvas.captureStream(60);
     const audioContext = new AudioContext();
     const audioDestination = audioContext.createMediaStreamDestination();
-    const legDurationSeconds = JOURNEY_DURATION_MS / 1000 / totalLegs;
+    const legDurationSeconds = totalDuration / 1000 / totalLegs;
     const audioStartTime = audioContext.currentTime + 0.08;
+    await audioContext.resume();
 
     await Promise.all(
       Array.from({ length: totalLegs }, async (_, index) => {
@@ -346,7 +358,7 @@ export function PreviewModal({
         const arrivalStop = locations[legIdx + 1] || locations[locations.length - 1];
         const arrivalImages = getLocationImages(arrivalStop);
         const photoIdx = Math.min(2, Math.floor(((legFraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT)) * 3));
-        const curSec = Math.floor(currentP * 35);
+        const curSec = Math.floor(currentP * duration);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
         const activeMap = frame.current?.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapCanvas;
@@ -528,7 +540,7 @@ export function PreviewModal({
         ctx.fillStyle = "#38bdf8";
         ctx.font = "700 15px system-ui, sans-serif";
         ctx.fillText(
-          `0:${curSec < 10 ? "0" : ""}${curSec} / 0:35 · 1080p HD 60FPS STORY`,
+          `${formatTime(curSec)} / ${formatTime(duration)} · 1080p HD 60FPS STORY`,
           540,
           1028
         );
@@ -662,7 +674,7 @@ export function PreviewModal({
           <div className="video-actions">
             <button
               aria-label={playing ? "Pause video" : "Play video"}
-              onClick={() => setPlaying((value) => !value)}
+              onClick={togglePlayback}
               disabled={recording}
             >
               {playing ? <Pause fill="currentColor" /> : <Play fill="currentColor" />}
@@ -679,7 +691,7 @@ export function PreviewModal({
               {muted ? <VolumeX /> : <Volume2 />}
             </button>
             <span>
-              0:{elapsedSec < 10 ? "0" : ""}{elapsedSec} / 0:35 · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name}
+              {formatTime(elapsedSec)} / {formatTime(duration)} · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

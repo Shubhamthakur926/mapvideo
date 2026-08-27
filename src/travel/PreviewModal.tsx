@@ -17,19 +17,8 @@ const vehicleMarks: Record<Transport, string> = {
   ship: "🚢",
 };
 
-const vehicleSounds: Record<Transport, string> = {
-  car: "/sounds/car.mp3",
-  bike: "/sounds/bike.mp3",
-  flight: "/sounds/flight.mp3",
-  train: "/sounds/train.mp3",
-  taxi: "/sounds/taxi.mp3",
-  bicycle: "/sounds/bicycle.mp3",
-  bus: "/sounds/bus.mp3",
-  walking: "/sounds/walking.mp3",
-  ship: "/sounds/ship.mp3",
-};
-
-const VEHICLE_VOLUME = 0.6;
+const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
+const BACKGROUND_MUSIC_VOLUME = 0.6;
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
 function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
@@ -172,7 +161,6 @@ export function PreviewModal({
     [locations]
   );
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
-  const currentTransport = legs[currentLegIndex] ?? "flight";
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
   const elapsedSec = Math.min(duration, Math.floor((internalProgress / 100) * duration));
 
@@ -199,7 +187,7 @@ export function PreviewModal({
   }, [playing, totalDuration, recording]);
 
 
-  // Keep the live transport sound aligned with the currently active leg.
+  // Keep one background track aligned with preview playback.
   useEffect(() => {
     if (recording) return;
 
@@ -207,28 +195,38 @@ export function PreviewModal({
     audioRef.current = audio;
     audio.loop = true;
     audio.muted = muted;
-    audio.volume = VEHICLE_VOLUME;
+    audio.volume = BACKGROUND_MUSIC_VOLUME;
 
-    const nextSource = vehicleSounds[currentTransport];
-    if (audio.src !== new URL(nextSource, window.location.href).href) {
-      audio.pause();
-      audio.src = nextSource;
+    const musicUrl = new URL(BACKGROUND_MUSIC_URL, window.location.href).href;
+    if (audio.src !== musicUrl) {
+      audio.src = BACKGROUND_MUSIC_URL;
       audio.currentTime = 0;
       audio.load();
     }
 
     if (playing) playPreviewAudio(audio);
     else audio.pause();
-  }, [currentTransport, muted, playing, recording]);
+  }, [muted, playing, recording]);
 
-  useEffect(() => () => {
-    audioRef.current?.pause();
-    audioRef.current = null;
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => {
+      audio?.pause();
+      if (audio) {
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      audioRef.current = null;
+    };
   }, []);
+
   const restart = () => {
     if (recording) return;
     audioRef.current?.pause();
-    if (audioRef.current) audioRef.current.currentTime = 0;
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.load();
+    }
     setInternalProgress(0);
     setRestartKey((value) => value + 1);
     setPlaying(true);
@@ -288,28 +286,22 @@ export function PreviewModal({
     const canvasStream = canvas.captureStream(60);
     const audioContext = new AudioContext();
     const audioDestination = audioContext.createMediaStreamDestination();
-    const legDurationSeconds = totalDuration / 1000 / totalLegs;
     const audioStartTime = audioContext.currentTime + 0.08;
     await audioContext.resume();
 
-    await Promise.all(
-      Array.from({ length: totalLegs }, async (_, index) => {
-        const transport = legs[index] ?? "flight";
-        try {
-          const buffer = await getVehicleAudioBuffer(audioContext, vehicleSounds[transport]);
-          const source = audioContext.createBufferSource();
-          const gain = audioContext.createGain();
-          source.buffer = buffer;
-          source.loop = true;
-          gain.gain.value = VEHICLE_VOLUME;
-          source.connect(gain).connect(audioDestination);
-          source.start(audioStartTime + index * legDurationSeconds);
-          source.stop(audioStartTime + (index + 1) * legDurationSeconds);
-        } catch (error) {
-          console.warn(`Unable to prepare ${transport} vehicle sound for export.`, error);
-        }
-      })
-    );
+    try {
+      const buffer = await getVehicleAudioBuffer(audioContext, BACKGROUND_MUSIC_URL);
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      source.buffer = buffer;
+      source.loop = true;
+      gain.gain.value = BACKGROUND_MUSIC_VOLUME;
+      source.connect(gain).connect(audioDestination);
+      source.start(audioStartTime);
+      source.stop(audioStartTime + totalDuration / 1000);
+    } catch (error) {
+      console.warn("Unable to prepare background music for export.", error);
+    }
 
     const mime =
       ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((type) =>

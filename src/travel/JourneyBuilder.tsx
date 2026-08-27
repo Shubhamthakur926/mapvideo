@@ -8,9 +8,19 @@ type Props = {
   onAdd: (location: Location) => void;
   onRemove: (index: number) => void;
   onTransport: (index: number, transport: Transport) => void;
+  onLoadDemo?: () => void;
+  duration?: number;
 };
 
-export function JourneyBuilder({ locations, legs, onAdd, onRemove, onTransport }: Props) {
+export function JourneyBuilder({
+  locations,
+  legs,
+  onAdd,
+  onRemove,
+  onTransport,
+  onLoadDemo,
+  duration = 20,
+}: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCountryFilter, setSelectedCountryFilter] = useState("ALL");
@@ -38,6 +48,8 @@ export function JourneyBuilder({ locations, legs, onAdd, onRemove, onTransport }
       });
   }, [locations, searchQuery, selectedCountryFilter]);
 
+  const legDurationSec = Math.round(duration / Math.max(1, locations.length - 1));
+
   return (
     <aside className="route-card">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -64,7 +76,7 @@ export function JourneyBuilder({ locations, legs, onAdd, onRemove, onTransport }
       {locations.length === 0 && (
         <div
           style={{
-            padding: "24px 16px",
+            padding: "20px 16px",
             textAlign: "center",
             background: "#f8fafc",
             borderRadius: "16px",
@@ -88,9 +100,34 @@ export function JourneyBuilder({ locations, legs, onAdd, onRemove, onTransport }
             <MapPin size={20} />
           </div>
           <b style={{ display: "block", color: "#1e293b", fontSize: "14px" }}>0 destinations selected</b>
-          <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#64748b" }}>
-            Choose where your journey begins, then select where you want to go!
+          <p style={{ margin: "4px 0 14px", fontSize: "12px", color: "#64748b" }}>
+            Choose where your journey begins, or load a sample trip!
           </p>
+
+          {onLoadDemo && (
+            <button
+              onClick={onLoadDemo}
+              type="button"
+              style={{
+                width: "100%",
+                padding: "9px 12px",
+                borderRadius: "10px",
+                background: "linear-gradient(135deg, #0284c7, #0369a1)",
+                color: "#ffffff",
+                border: "none",
+                fontWeight: 700,
+                fontSize: "12px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                boxShadow: "0 2px 8px rgba(2, 132, 199, 0.35)",
+              }}
+            >
+              ✨ Load 2-Min Multi-Transport (✈️ 🚆 🚗 🚲 🚶)
+            </button>
+          )}
         </div>
       )}
 
@@ -143,7 +180,7 @@ export function JourneyBuilder({ locations, legs, onAdd, onRemove, onTransport }
                   </option>
                 ))}
               </select>
-              <small>0:18</small>
+              <small>{legDurationSec}s</small>
             </div>
           )}
         </div>

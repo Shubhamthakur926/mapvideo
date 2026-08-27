@@ -131,16 +131,25 @@ async function preloadImages(urls: string[]): Promise<Map<string, HTMLImageEleme
   return map;
 }
 
+// Helper to format seconds as M:SS (e.g. 0:45, 2:00, 3:30)
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s < 10 ? "0" : ""}${s}`;
+}
+
 export function PreviewModal({
   locations,
   legs,
   onClose,
   autoRecord = false,
+  duration = 20,
 }: {
   locations: Location[];
   legs: Transport[];
   onClose: () => void;
   autoRecord?: boolean;
+  duration?: number;
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -152,17 +161,10 @@ export function PreviewModal({
   const [muted, setMuted] = useState(false);
   
   const totalLegs = Math.max(1, locations.length - 1);
-  const totalDuration = JOURNEY_DURATION_MS; // 35-second story
+  const totalDuration = duration * 1000;
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
   const elapsedSec = Math.min(35, Math.floor((internalProgress / 100) * 35));
-  const currentTransport = legs[currentLegIndex] ?? "flight";
-  const legDistances = useMemo(
-    () => locations.slice(0, -1).map((start, index) => calculateDistanceKm(start, locations[index + 1])),
-    [locations]
-  );
-  const currentLegDistance = formatDistanceKm(legDistances[currentLegIndex] ?? 0);
-  const totalTripDistance = formatDistanceKm(legDistances.reduce((sum, distance) => sum + distance, 0));
 
   // Close on Escape key press
   useEffect(() => {
@@ -308,8 +310,8 @@ export function PreviewModal({
 
     recorder.start();
 
-    // 3. Run synchronized 35s recording loop
-    const length = 35 * 1000;
+    // 3. Run synchronized recording loop with dynamic duration (min 20s, max 4 min)
+    const length = duration * 1000;
     const started = performance.now();
 
     await new Promise<void>((resolve) => {
@@ -334,7 +336,6 @@ export function PreviewModal({
         const arrivalImages = getLocationImages(arrivalStop);
         const photoIdx = Math.min(2, Math.floor(((legFraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT)) * 3));
         const curSec = Math.floor(currentP * 35);
-        const currentLegDistance = formatDistanceKm(legDistances[legIdx] ?? 0);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
         const activeMap = frame.current?.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapCanvas;
@@ -516,7 +517,7 @@ export function PreviewModal({
         ctx.fillStyle = "#38bdf8";
         ctx.font = "700 15px system-ui, sans-serif";
         ctx.fillText(
-          `0:${curSec < 10 ? "0" : ""}${curSec} / 0:35 · 1080p HD 60FPS STORY · ${currentLegDistance}`,
+          `0:${curSec < 10 ? "0" : ""}${curSec} / 0:35 · 1080p HD 60FPS STORY`,
           540,
           1028
         );
@@ -667,7 +668,7 @@ export function PreviewModal({
               {muted ? <VolumeX /> : <Volume2 />}
             </button>
             <span>
-              0:{elapsedSec < 10 ? "0" : ""}{elapsedSec} / 0:35 · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name} · {currentLegDistance}
+              0:{elapsedSec < 10 ? "0" : ""}{elapsedSec} / 0:35 · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

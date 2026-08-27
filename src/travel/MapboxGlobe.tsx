@@ -1130,7 +1130,7 @@ export function MapboxGlobe({
   useEffect(() => {
     if (!playing || externalProgress !== undefined) return;
     let frame = 0;
-    const duration = 35 * 1000; // 35-second story
+    const duration = 20 * 1000; // Medium-speed story
     const started = performance.now();
     const animate = (now: number) => {
       setInternalProgress(((now - started) % duration) / duration);

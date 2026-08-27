@@ -1,6 +1,6 @@
-import { Download, Expand, Loader2, Pause, Play, RotateCcw, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { MapboxGlobe } from "./MapboxGlobe";
+import { Download, Expand, Loader2, Pause, Play, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { calculateDistanceKm, formatDistanceKm, MapboxGlobe } from "./MapboxGlobe";
 import { getLocationImages, type Location, type Transport } from "./types";
 import "./map-video.css";
 import "./video-controls.css";
@@ -17,6 +17,40 @@ const vehicleMarks: Record<Transport, string> = {
   ship: "🚢",
 };
 
+const vehicleSounds: Record<Transport, string> = {
+  car: "/sounds/car.mp3",
+  bike: "/sounds/bike.mp3",
+  flight: "/sounds/flight.mp3",
+  train: "/sounds/train.mp3",
+  taxi: "/sounds/taxi.mp3",
+  bicycle: "/sounds/bicycle.mp3",
+  bus: "/sounds/bus.mp3",
+  walking: "/sounds/walking.mp3",
+  ship: "/sounds/ship.mp3",
+};
+
+const VEHICLE_VOLUME = 0.6;
+const JOURNEY_DURATION_MS = 35 * 1000;
+const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
+
+function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
+  let buffer = audioBufferCache.get(url);
+  if (!buffer) {
+    buffer = fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Unable to load vehicle sound: ${url}`);
+        return response.arrayBuffer();
+      })
+      .then((data) => context.decodeAudioData(data));
+    buffer.catch(() => audioBufferCache.delete(url));
+    audioBufferCache.set(url, buffer);
+  }
+  return buffer;
+}
+
+function playPreviewAudio(audio: HTMLAudioElement) {
+  void audio.play().catch((error) => console.warn("Vehicle sound autoplay was blocked.", error));
+}
 // Canvas drawing helper for rounded rectangles
 function drawRoundedRect(
   ctx: CanvasRenderingContext2D,
@@ -109,17 +143,26 @@ export function PreviewModal({
   autoRecord?: boolean;
 }) {
   const frame = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(true);
   const [internalProgress, setInternalProgress] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [recording, setRecording] = useState(false);
   const [recordProgress, setRecordProgress] = useState(0);
+  const [muted, setMuted] = useState(false);
   
   const totalLegs = Math.max(1, locations.length - 1);
-  const totalDuration = 35 * 1000; // 35-second story
+  const totalDuration = JOURNEY_DURATION_MS; // 35-second story
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
   const elapsedSec = Math.min(35, Math.floor((internalProgress / 100) * 35));
+  const currentTransport = legs[currentLegIndex] ?? "flight";
+  const legDistances = useMemo(
+    () => locations.slice(0, -1).map((start, index) => calculateDistanceKm(start, locations[index + 1])),
+    [locations]
+  );
+  const currentLegDistance = formatDistanceKm(legDistances[currentLegIndex] ?? 0);
+  const totalTripDistance = formatDistanceKm(legDistances.reduce((sum, distance) => sum + distance, 0));
 
   // Close on Escape key press
   useEffect(() => {
@@ -143,8 +186,37 @@ export function PreviewModal({
     return () => window.clearInterval(timer);
   }, [playing, totalDuration, recording]);
 
+
+  // Keep the live transport sound aligned with the currently active leg.
+  useEffect(() => {
+    if (recording) return;
+
+    const audio = audioRef.current ?? new Audio();
+    audioRef.current = audio;
+    audio.loop = true;
+    audio.muted = muted;
+    audio.volume = VEHICLE_VOLUME;
+
+    const nextSource = vehicleSounds[currentTransport];
+    if (audio.src !== new URL(nextSource, window.location.href).href) {
+      audio.pause();
+      audio.src = nextSource;
+      audio.currentTime = 0;
+      audio.load();
+    }
+
+    if (playing) playPreviewAudio(audio);
+    else audio.pause();
+  }, [currentTransport, muted, playing, recording]);
+
+  useEffect(() => () => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+  }, []);
   const restart = () => {
     if (recording) return;
+    audioRef.current?.pause();
+    if (audioRef.current) audioRef.current.currentTime = 0;
     setInternalProgress(0);
     setRestartKey((value) => value + 1);
     setPlaying(true);
@@ -174,6 +246,7 @@ export function PreviewModal({
     setRecording(true);
     setRecordProgress(0);
     setPlaying(false);
+    audioRef.current?.pause();
 
     // 2. Prepare 1080x1080 composite canvas
     const canvas = document.createElement("canvas");
@@ -188,12 +261,40 @@ export function PreviewModal({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
+    const canvasStream = canvas.captureStream(60);
+    const audioContext = new AudioContext();
+    const audioDestination = audioContext.createMediaStreamDestination();
+    const legDurationSeconds = JOURNEY_DURATION_MS / 1000 / totalLegs;
+    const audioStartTime = audioContext.currentTime + 0.08;
+
+    await Promise.all(
+      Array.from({ length: totalLegs }, async (_, index) => {
+        const transport = legs[index] ?? "flight";
+        try {
+          const buffer = await getVehicleAudioBuffer(audioContext, vehicleSounds[transport]);
+          const source = audioContext.createBufferSource();
+          const gain = audioContext.createGain();
+          source.buffer = buffer;
+          source.loop = true;
+          gain.gain.value = VEHICLE_VOLUME;
+          source.connect(gain).connect(audioDestination);
+          source.start(audioStartTime + index * legDurationSeconds);
+          source.stop(audioStartTime + (index + 1) * legDurationSeconds);
+        } catch (error) {
+          console.warn(`Unable to prepare ${transport} vehicle sound for export.`, error);
+        }
+      })
+    );
+
     const mime =
-      ["video/mp4;codecs=avc1.42E01E", "video/mp4", "video/webm;codecs=vp9", "video/webm"].find((type) =>
+      ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((type) =>
         MediaRecorder.isTypeSupported(type)
       ) ?? "video/webm";
-
-    const recorder = new MediaRecorder(canvas.captureStream(60), {
+    const combinedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioDestination.stream.getAudioTracks(),
+    ]);
+    const recorder = new MediaRecorder(combinedStream, {
       mimeType: mime,
       videoBitsPerSecond: 12000000,
     });
@@ -233,6 +334,7 @@ export function PreviewModal({
         const arrivalImages = getLocationImages(arrivalStop);
         const photoIdx = Math.min(2, Math.floor(((legFraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT)) * 3));
         const curSec = Math.floor(currentP * 35);
+        const currentLegDistance = formatDistanceKm(legDistances[legIdx] ?? 0);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
         const activeMap = frame.current?.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapCanvas;
@@ -406,7 +508,7 @@ export function PreviewModal({
         ctx.shadowColor = "rgba(0,0,0,0.9)";
         ctx.shadowBlur = 16;
         ctx.fillText(
-          `${locations[0].name} → ${locations[locations.length - 1].name}`,
+          `${locations[0].name} → ${locations[locations.length - 1].name} · ${totalTripDistance} total`,
           540,
           995
         );
@@ -414,7 +516,7 @@ export function PreviewModal({
         ctx.fillStyle = "#38bdf8";
         ctx.font = "700 15px system-ui, sans-serif";
         ctx.fillText(
-          `0:${curSec < 10 ? "0" : ""}${curSec} / 0:35 · 1080p HD 60FPS STORY`,
+          `0:${curSec < 10 ? "0" : ""}${curSec} / 0:35 · 1080p HD 60FPS STORY · ${currentLegDistance}`,
           540,
           1028
         );
@@ -437,7 +539,14 @@ export function PreviewModal({
       requestAnimationFrame(anim);
     });
 
-    const blob = await videoPromise;
+    let blob: Blob;
+    try {
+      blob = await videoPromise;
+    } finally {
+      canvasStream.getTracks().forEach((track) => track.stop());
+      audioDestination.stream.getTracks().forEach((track) => track.stop());
+      await audioContext.close();
+    }
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -549,8 +658,16 @@ export function PreviewModal({
             <button aria-label="Restart video" onClick={restart} disabled={recording}>
               <RotateCcw />
             </button>
+            <button
+              aria-label={muted ? "Unmute vehicle sound" : "Mute vehicle sound"}
+              title={muted ? "Unmute vehicle sound" : "Mute vehicle sound"}
+              onClick={() => setMuted((value) => !value)}
+              disabled={recording}
+            >
+              {muted ? <VolumeX /> : <Volume2 />}
+            </button>
             <span>
-              0:{elapsedSec < 10 ? "0" : ""}{elapsedSec} / 0:35 · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name}
+              0:{elapsedSec < 10 ? "0" : ""}{elapsedSec} / 0:35 · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name} · {currentLegDistance}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

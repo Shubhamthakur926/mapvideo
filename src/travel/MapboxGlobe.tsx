@@ -396,7 +396,7 @@ function getPolylineUpTo(coords: [number, number][], fraction: number): [number,
   return result;
 }
 
-function calculateDistanceKm(start: Location, end: Location): number {
+export function calculateDistanceKm(start: Location, end: Location): number {
   const R = 6371;
   const dLat = ((end.lat - start.lat) * Math.PI) / 180;
   const dLng = ((end.lng - start.lng) * Math.PI) / 180;
@@ -408,6 +408,12 @@ function calculateDistanceKm(start: Location, end: Location): number {
       Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+}
+
+export function formatDistanceKm(distanceKm: number): string {
+  return distanceKm < 10
+    ? distanceKm.toFixed(1) + " km"
+    : Math.round(distanceKm).toLocaleString() + " km";
 }
 
 function getCinematicCamera(start: Location, end: Location, fraction: number, transport: Transport) {
@@ -481,6 +487,10 @@ export function MapboxGlobe({
 
   const totalLegs = Math.max(1, locations.length - 1);
   const currentProgress = externalProgress !== undefined ? externalProgress : internalProgress;
+  const legDistances = useMemo(
+    () => locations.slice(0, -1).map((start, index) => calculateDistanceKm(start, locations[index + 1])),
+    [locations]
+  );
 
   // Coordinates for all legs (Roads, Sea-lanes, or Flight Arcs)
   const [legRoutes, setLegRoutes] = useState<[number, number][][]>(() => {
@@ -1312,6 +1322,11 @@ export function MapboxGlobe({
             <div style={{ fontSize: "11px", color: "#94a3b8" }}>
               {currentStop.country} · <span style={{ color: "#38bdf8", fontWeight: 700 }}>{currentStop.code}</span>
             </div>
+            {locations.length > 1 && (
+              <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px" }}>
+                {formatDistanceKm(legDistances[activeLegIndex] ?? 0)}
+              </div>
+            )}
           </div>
         </div>
       )}

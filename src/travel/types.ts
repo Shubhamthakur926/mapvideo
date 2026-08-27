@@ -8,8 +8,104 @@ export type Location = {
   lat: number;
   lng: number;
   imageUrl?: string;
+  images?: string[];
   description?: string;
 };
+
+export function getLocationImages(place?: Location | null): string[] {
+  if (!place) return [];
+  if (place.images && place.images.length > 0) return place.images;
+  if (!place.imageUrl) return [];
+
+  const id = place.id.toLowerCase();
+  const name = place.name.toLowerCase();
+
+  if (id.includes("delhi") || name.includes("delhi")) {
+    return [
+      "https://images.unsplash.com/photo-1587474260584-136574528ed5?w=900&auto=format&fit=crop&q=80", // India Gate
+      "https://images.unsplash.com/photo-1592635196078-9fdc757f27f4?w=900&auto=format&fit=crop&q=80", // Humayun's Tomb
+      "https://images.unsplash.com/photo-1548013146-72479768bada?w=900&auto=format&fit=crop&q=80", // Red Fort
+    ];
+  }
+  if (id.includes("goa") || name.includes("goa")) {
+    return [
+      "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=900&auto=format&fit=crop&q=80", // Palolem Beach
+      "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&auto=format&fit=crop&q=80", // Sunset Coast
+      "https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=900&auto=format&fit=crop&q=80", // Palms & Shore
+    ];
+  }
+  if (id.includes("shimla") || name.includes("shimla")) {
+    return [
+      "https://images.unsplash.com/photo-1597074866923-dc0589150358?w=900&auto=format&fit=crop&q=80", // The Ridge
+      "https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=900&auto=format&fit=crop&q=80", // Snowy Mountain Valley
+      "https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=900&auto=format&fit=crop&q=80", // Pine Forest View
+    ];
+  }
+  if (id.includes("mumbai") || name.includes("mumbai")) {
+    return [
+      "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?w=900&auto=format&fit=crop&q=80", // Gateway of India
+      "https://images.unsplash.com/photo-1566552881560-0be862a7c445?w=900&auto=format&fit=crop&q=80", // Marine Drive
+      "https://images.unsplash.com/photo-1595658658481-d53d3f999875?w=900&auto=format&fit=crop&q=80", // Sea Link
+    ];
+  }
+  if (id.includes("jaipur") || name.includes("jaipur")) {
+    return [
+      "https://images.unsplash.com/photo-1603262110263-fb010d6e75dc?w=900&auto=format&fit=crop&q=80", // Hawa Mahal
+      "https://images.unsplash.com/photo-1599661046289-e31897846e41?w=900&auto=format&fit=crop&q=80", // Amber Fort
+      "https://images.unsplash.com/photo-1477587458883-47145ed94245?w=900&auto=format&fit=crop&q=80", // City Palace
+    ];
+  }
+  if (id.includes("manali") || name.includes("manali")) {
+    return [
+      "https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=900&auto=format&fit=crop&q=80", // Snow Peaks
+      "https://images.unsplash.com/photo-1585135497273-1a86b09fe70e?w=900&auto=format&fit=crop&q=80", // Pine Valley
+      "https://images.unsplash.com/photo-1597074866923-dc0589150358?w=900&auto=format&fit=crop&q=80", // Solang Valley
+    ];
+  }
+  if (id.includes("paris") || name.includes("paris")) {
+    return [
+      "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=900&auto=format&fit=crop&q=80", // Eiffel Tower
+      "https://images.unsplash.com/photo-1522093007474-d86e9bf7ba6f?w=900&auto=format&fit=crop&q=80", // Louvre Pyramid
+      "https://images.unsplash.com/photo-1499856871958-5b9627545d1a?w=900&auto=format&fit=crop&q=80", // Notre Dame & Seine
+    ];
+  }
+  if (id.includes("tokyo") || name.includes("tokyo")) {
+    return [
+      "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=900&auto=format&fit=crop&q=80", // Tokyo Tower
+      "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=900&auto=format&fit=crop&q=80", // Shibuya Crossing
+      "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=900&auto=format&fit=crop&q=80", // Mt Fuji & Sakura
+    ];
+  }
+  if (id.includes("dubai") || name.includes("dubai")) {
+    return [
+      "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=900&auto=format&fit=crop&q=80", // Burj Khalifa
+      "https://images.unsplash.com/photo-1518684079-3c830dcef090?w=900&auto=format&fit=crop&q=80", // Marina Skyline
+      "https://images.unsplash.com/photo-1580674684081-7617fbf3d745?w=900&auto=format&fit=crop&q=80", // Desert Safari
+    ];
+  }
+  if (id.includes("london") || name.includes("london")) {
+    return [
+      "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=900&auto=format&fit=crop&q=80", // Big Ben
+      "https://images.unsplash.com/photo-1526129318478-62ed807ebdf9?w=900&auto=format&fit=crop&q=80", // Tower Bridge
+      "https://images.unsplash.com/photo-1533929736458-ca588d08c8be?w=900&auto=format&fit=crop&q=80", // London Eye
+    ];
+  }
+  if (id.includes("new-york") || name.includes("new york")) {
+    return [
+      "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=900&auto=format&fit=crop&q=80", // Skyline
+      "https://images.unsplash.com/photo-1534430480872-3498386e7856?w=900&auto=format&fit=crop&q=80", // Central Park
+      "https://images.unsplash.com/photo-1485871981521-5b1fd3805eee?w=900&auto=format&fit=crop&q=80", // Times Square
+    ];
+  }
+
+  // High quality Unsplash landmark photo variations
+  const base = place.imageUrl.split("?")[0];
+  return [
+    place.imageUrl,
+    `${base}?w=900&auto=format&fit=crop&q=80&sig=2`,
+    `${base}?w=900&auto=format&fit=crop&q=80&sig=3`,
+  ];
+}
 
 export const destinations: Location[] = [
   // India & South Asia

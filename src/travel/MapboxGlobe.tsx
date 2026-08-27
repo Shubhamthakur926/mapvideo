@@ -1,9 +1,9 @@
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Location, Transport } from "./types";
+import { getLocationImages, type Location, type Transport } from "./types";
 
 export const MAPBOX_TOKEN =
-  (import.meta as { env?: { VITE_MAPBOX_TOKEN?: string } }).env?.VITE_MAPBOX_TOKEN;
+  (import.meta as { env?: { VITE_MAPBOX_TOKEN?: string } }).env?.VITE_MAPBOX_TOKEN || "";
 
 type Props = {
   locations: Location[];
@@ -13,6 +13,7 @@ type Props = {
   playing?: boolean;
   className?: string;
   onSelectDestination?: (location: Location) => void;
+  hideOverlays?: boolean;
 };
 
 const vehicleMarks: Record<Transport, string> = {
@@ -467,6 +468,7 @@ export function MapboxGlobe({
   playing = true,
   className = "",
   onSelectDestination,
+  hideOverlays = false,
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -510,7 +512,21 @@ export function MapboxGlobe({
   }, [locations, legs]);
 
   // Active leg & destination stop computation along real roads / sea / sky
-  const { currentPoint, currentMark, currentStop, activeLegIndex, legFraction, bearing, transport, currentStart, currentEnd } = useMemo(() => {
+  const {
+    currentPoint,
+    currentMark,
+    currentStop,
+    activeLegIndex,
+    legFraction,
+    bearing,
+    transport,
+    currentStart,
+    currentEnd,
+    isArrival,
+    arrivalStop,
+    activePhotoIndex,
+    arrivalImages,
+  } = useMemo(() => {
     if (locations.length < 2) {
       return {
         currentPoint: locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : null,
@@ -522,6 +538,10 @@ export function MapboxGlobe({
         transport: "flight" as Transport,
         currentStart: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
         currentEnd: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
+        isArrival: false,
+        arrivalStop: null,
+        activePhotoIndex: 0,
+        arrivalImages: [],
       };
     }
 
@@ -536,11 +556,21 @@ export function MapboxGlobe({
 
     const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
 
-    const { pt: point, bearing: calculatedBearing } = getPointAlongPolyline(coords, fraction);
-    const activeDisplayStop = fraction < 0.3 ? start : end;
+    // 65% of the leg time is traveling along the route, 35% is arrival photo showcase
+    const TRAVEL_SPLIT = 0.65;
+    const arrivalActive = fraction >= TRAVEL_SPLIT;
+    const pathFraction = arrivalActive ? 1.0 : Math.min(1, fraction / TRAVEL_SPLIT);
+
+    const { pt: point, bearing: calculatedBearing } = getPointAlongPolyline(coords, pathFraction);
+    const activeDisplayStop = fraction < 0.25 ? start : end;
+
+    // Active arrival photo index (cycles 0 -> 1 -> 2 during arrival showcase)
+    const arrivalShowcaseFraction = arrivalActive ? (fraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT) : 0;
+    const photoIdx = Math.min(2, Math.floor(arrivalShowcaseFraction * 3));
+    const destImages = arrivalActive ? getLocationImages(end) : [];
 
     return {
-      currentPoint: point,
+      currentPoint: arrivalActive ? { lat: end.lat, lng: end.lng } : point,
       currentMark: mark,
       currentStop: activeDisplayStop,
       activeLegIndex: legIdx,
@@ -549,6 +579,10 @@ export function MapboxGlobe({
       transport: curTransport,
       currentStart: start,
       currentEnd: end,
+      isArrival: arrivalActive,
+      arrivalStop: arrivalActive ? end : null,
+      activePhotoIndex: photoIdx,
+      arrivalImages: destImages,
     };
   }, [totalLegs, currentProgress, legs, locations, legRoutes]);
 
@@ -799,7 +833,9 @@ export function MapboxGlobe({
           legs[activeLegIndex] ?? "flight"
         );
 
-      const partialCoords = getPolylineUpTo(curCoords, legFraction);
+      const TRAVEL_SPLIT = 0.65;
+      const pathProgress = isArrival ? 1.0 : Math.min(1, legFraction / TRAVEL_SPLIT);
+      const partialCoords = isArrival ? curCoords : getPolylineUpTo(curCoords, pathProgress);
       if (partialCoords.length > 1) {
         activeFeatures.push({
           type: "Feature",
@@ -816,7 +852,7 @@ export function MapboxGlobe({
       type: "FeatureCollection",
       features: activeFeatures,
     });
-  }, [activeLegIndex, legFraction, locations, mapLoaded, legRoutes, legs]);
+  }, [activeLegIndex, legFraction, isArrival, locations, mapLoaded, legRoutes, legs]);
 
   // Initialize and update Clean Waypoint Pin Markers on the Map
   useEffect(() => {
@@ -829,59 +865,147 @@ export function MapboxGlobe({
 
     locations.forEach((loc, idx) => {
       const wrapper = document.createElement("div");
-      wrapper.className = "mapbox-pin-wrapper";
+      wrapper.className = "mapbox-destination-marker";
       wrapper.style.cssText = `
         display: flex;
         flex-direction: column;
         align-items: center;
         cursor: pointer;
         user-select: none;
-        z-index: 10;
+        z-index: 15;
       `;
 
-      // Clean numbered circular pin badge
-      const badge = document.createElement("div");
-      badge.className = "mapbox-pin-badge";
-      badge.style.cssText = `
-        width: 26px;
-        height: 26px;
-        border-radius: 50%;
-        background: #0284c7;
-        color: #ffffff;
-        font-size: 11px;
-        font-weight: 800;
+      // Glassmorphic Destination Card Badge
+      const card = document.createElement("div");
+      card.className = "mapbox-destination-card";
+      card.style.cssText = `
         display: flex;
         align-items: center;
-        justify-content: center;
-        border: 2px solid #ffffff;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-        transition: transform 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+        gap: 8px;
+        padding: 4px 10px 4px 5px;
+        border-radius: 20px;
+        background: rgba(3, 16, 29, 0.92);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1.5px solid rgba(56, 189, 248, 0.45);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(56, 189, 248, 0.2);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+        white-space: nowrap;
       `;
-      badge.textContent = `${idx + 1}`;
-      wrapper.appendChild(badge);
+
+      // Thumbnail Image or Number Badge
+      if (loc.imageUrl) {
+        const img = document.createElement("img");
+        img.src = loc.imageUrl;
+        img.alt = loc.name;
+        img.style.cssText = `
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          object-fit: cover;
+          border: 1.5px solid #38bdf8;
+          flex-shrink: 0;
+          display: block;
+        `;
+        card.appendChild(img);
+      } else {
+        const numBadge = document.createElement("span");
+        numBadge.style.cssText = `
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          background: #0284c7;
+          color: #ffffff;
+          font-size: 11px;
+          font-weight: 800;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1.5px solid #38bdf8;
+          flex-shrink: 0;
+        `;
+        numBadge.textContent = `${idx + 1}`;
+        card.appendChild(numBadge);
+      }
+
+      // Destination Name & Info Label
+      const labelDiv = document.createElement("div");
+      labelDiv.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      `;
+
+      const nameSpan = document.createElement("span");
+      nameSpan.style.cssText = `
+        font-size: 12px;
+        font-weight: 700;
+        color: #ffffff;
+        font-family: Inter, system-ui, -apple-system, sans-serif;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+      `;
+      nameSpan.textContent = loc.name;
+      labelDiv.appendChild(nameSpan);
+
+      if (loc.code) {
+        const codeSpan = document.createElement("span");
+        codeSpan.style.cssText = `
+          font-size: 9px;
+          font-weight: 800;
+          color: #38bdf8;
+          background: rgba(56, 189, 248, 0.18);
+          border: 1px solid rgba(56, 189, 248, 0.4);
+          padding: 1px 5px;
+          border-radius: 6px;
+          letter-spacing: 0.05em;
+        `;
+        codeSpan.textContent = loc.code;
+        labelDiv.appendChild(codeSpan);
+      }
+
+      card.appendChild(labelDiv);
+      wrapper.appendChild(card);
 
       // Pin needle
       const needle = document.createElement("div");
       needle.style.cssText = `
         width: 2px;
-        height: 8px;
-        background: #38bdf8;
-        box-shadow: 0 0 6px #38bdf8;
+        height: 10px;
+        background: linear-gradient(to bottom, #38bdf8, rgba(56, 189, 248, 0.2));
+        box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
       `;
       wrapper.appendChild(needle);
 
       // Anchor dot
       const pinDot = document.createElement("div");
       pinDot.style.cssText = `
-        width: 6px;
-        height: 6px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
-        background: #ffffff;
-        box-shadow: 0 0 8px #38bdf8;
+        background: #38bdf8;
+        border: 2px solid #ffffff;
+        box-shadow: 0 0 10px rgba(56, 189, 248, 1), 0 0 4px #ffffff;
+        margin-top: -2px;
       `;
       wrapper.appendChild(pinDot);
 
-      wrapper.onclick = () => {
+      // Hover interaction
+      wrapper.onmouseenter = () => {
+        card.style.transform = "scale(1.08)";
+        card.style.borderColor = "#38bdf8";
+        card.style.boxShadow = "0 10px 28px rgba(0,0,0,0.8), 0 0 16px rgba(56, 189, 248, 0.6)";
+        wrapper.style.zIndex = "30";
+      };
+      wrapper.onmouseleave = () => {
+        card.style.transform = "scale(1.0)";
+        card.style.borderColor = "rgba(56, 189, 248, 0.45)";
+        card.style.background = "rgba(3, 16, 29, 0.92)";
+        card.style.boxShadow = "0 6px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(56, 189, 248, 0.2)";
+        wrapper.style.zIndex = "15";
+      };
+
+      wrapper.onclick = (e) => {
+        e.stopPropagation();
         onSelectDestination?.(loc);
         map.flyTo({ center: [loc.lng, loc.lat], zoom: 4.5, pitch: 40, duration: 1200 });
       };
@@ -890,24 +1014,26 @@ export function MapboxGlobe({
         .setLngLat([loc.lng, loc.lat])
         .addTo(map);
 
-      stopMarkersRef.current.push({ marker, badgeEl: badge, id: loc.id });
+      stopMarkersRef.current.push({ marker, badgeEl: card, id: loc.id });
     });
   }, [locations, onSelectDestination]);
 
-  // Update active state styling for pin badges
+  // Update active state styling for destination cards
   useEffect(() => {
     stopMarkersRef.current.forEach((item) => {
       const isTarget = currentStop && currentStop.id === item.id;
       if (isTarget) {
-        item.badgeEl.style.background = "#38bdf8";
-        item.badgeEl.style.boxShadow = "0 0 16px rgba(56, 189, 248, 1), 0 4px 12px rgba(0,0,0,0.8)";
-        item.badgeEl.style.transform = "scale(1.2)";
+        item.badgeEl.style.borderColor = "#38bdf8";
+        item.badgeEl.style.background = "rgba(7, 30, 53, 0.96)";
+        item.badgeEl.style.boxShadow = "0 0 20px rgba(56, 189, 248, 0.95), 0 10px 28px rgba(0,0,0,0.85)";
+        item.badgeEl.style.transform = "scale(1.12)";
         item.marker.getElement().style.zIndex = "35";
       } else {
-        item.badgeEl.style.background = "#0284c7";
-        item.badgeEl.style.boxShadow = "0 4px 12px rgba(0,0,0,0.6)";
+        item.badgeEl.style.borderColor = "rgba(56, 189, 248, 0.45)";
+        item.badgeEl.style.background = "rgba(3, 16, 29, 0.92)";
+        item.badgeEl.style.boxShadow = "0 6px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(56, 189, 248, 0.2)";
         item.badgeEl.style.transform = "scale(1.0)";
-        item.marker.getElement().style.zIndex = "10";
+        item.marker.getElement().style.zIndex = "15";
       }
     });
   }, [currentStop]);
@@ -958,24 +1084,37 @@ export function MapboxGlobe({
     }
 
     // Dynamic Cinematic Camera Tracking (Smooth Altitude Arc & Optimal Ground Framing)
-    const { zoom: targetZoom, pitch: targetPitch } = getCinematicCamera(
-      currentStart,
-      currentEnd,
-      legFraction,
-      transport
-    );
+    if (isArrival && currentEnd) {
+      if (playing) {
+        map.easeTo({
+          center: [currentEnd.lng, currentEnd.lat],
+          zoom: 7.0,
+          pitch: 42,
+          bearing: 0,
+          duration: 140,
+          easing: (t) => t,
+        });
+      }
+    } else {
+      const { zoom: targetZoom, pitch: targetPitch } = getCinematicCamera(
+        currentStart,
+        currentEnd,
+        Math.min(1, legFraction / 0.65),
+        transport
+      );
 
-    if (playing) {
-      map.easeTo({
-        center: [currentPoint.lng, currentPoint.lat],
-        zoom: targetZoom,
-        pitch: targetPitch,
-        bearing: 0, // Lock North-up so map is always right-side up
-        duration: 120,
-        easing: (t) => t,
-      });
+      if (playing) {
+        map.easeTo({
+          center: [currentPoint.lng, currentPoint.lat],
+          zoom: targetZoom,
+          pitch: targetPitch,
+          bearing: 0, // Lock North-up so map is always right-side up
+          duration: 120,
+          easing: (t) => t,
+        });
+      }
     }
-  }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, locations]);
+  }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations]);
 
   // Internal animation loop only if external progress is not provided
   useEffect(() => {
@@ -1039,71 +1178,73 @@ export function MapboxGlobe({
       )}
 
       {/* Map Style Selector */}
-      <div
-        style={{
-          position: "absolute",
-          top: "16px",
-          right: className.includes("map-video-globe") ? "68px" : "16px",
-          zIndex: 30,
-          display: "flex",
-          alignItems: "center",
-          gap: "4px",
-          background: "rgba(3, 16, 29, 0.85)",
-          backdropFilter: "blur(10px)",
-          padding: "6px 8px",
-          borderRadius: "14px",
-          border: "1px solid rgba(255, 255, 255, 0.2)",
-        }}
-      >
-        <button
-          onClick={() => setMapStyle("mapbox://styles/mapbox/satellite-streets-v12")}
+      {!hideOverlays && (
+        <div
           style={{
-            padding: "5px 10px",
-            borderRadius: "8px",
-            border: 0,
-            fontSize: "11px",
-            fontWeight: 600,
-            cursor: "pointer",
-            background: mapStyle.includes("satellite") ? "#078fe3" : "transparent",
-            color: "#fff",
+            position: "absolute",
+            top: "16px",
+            right: className.includes("map-video-globe") ? "68px" : "16px",
+            zIndex: 30,
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+            background: "rgba(3, 16, 29, 0.85)",
+            backdropFilter: "blur(10px)",
+            padding: "6px 8px",
+            borderRadius: "14px",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
           }}
         >
-          Satellite 3D
-        </button>
-        <button
-          onClick={() => setMapStyle("mapbox://styles/mapbox/outdoors-v12")}
-          style={{
-            padding: "5px 10px",
-            borderRadius: "8px",
-            border: 0,
-            fontSize: "11px",
-            fontWeight: 600,
-            cursor: "pointer",
-            background: mapStyle.includes("outdoors") ? "#078fe3" : "transparent",
-            color: "#fff",
-          }}
-        >
-          Terrain
-        </button>
-        <button
-          onClick={() => setMapStyle("mapbox://styles/mapbox/navigation-night-v1")}
-          style={{
-            padding: "5px 10px",
-            borderRadius: "8px",
-            border: 0,
-            fontSize: "11px",
-            fontWeight: 600,
-            cursor: "pointer",
-            background: mapStyle.includes("navigation-night") ? "#078fe3" : "transparent",
-            color: "#fff",
-          }}
-        >
-          Night
-        </button>
-      </div>
+          <button
+            onClick={() => setMapStyle("mapbox://styles/mapbox/satellite-streets-v12")}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "8px",
+              border: 0,
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              background: mapStyle.includes("satellite") ? "#078fe3" : "transparent",
+              color: "#fff",
+            }}
+          >
+            Satellite 3D
+          </button>
+          <button
+            onClick={() => setMapStyle("mapbox://styles/mapbox/outdoors-v12")}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "8px",
+              border: 0,
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              background: mapStyle.includes("outdoors") ? "#078fe3" : "transparent",
+              color: "#fff",
+            }}
+          >
+            Terrain
+          </button>
+          <button
+            onClick={() => setMapStyle("mapbox://styles/mapbox/navigation-night-v1")}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "8px",
+              border: 0,
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: "pointer",
+              background: mapStyle.includes("navigation-night") ? "#078fe3" : "transparent",
+              color: "#fff",
+            }}
+          >
+            Night
+          </button>
+        </div>
+      )}
 
       {/* Single Active Destination Card (Top of Video) */}
-      {currentStop && locations.length > 0 && (
+      {!hideOverlays && currentStop && locations.length > 0 && (
         <div
           style={{
             position: "absolute",
@@ -1150,9 +1291,11 @@ export function MapboxGlobe({
             >
               {locations.length < 2
                 ? "📍 Selected Destination"
-                : legFraction < 0.3
+                : isArrival
+                ? `🎉 Arrived (Stop ${activeLegIndex + 2} of ${totalLegs + 1})`
+                : legFraction < 0.25
                 ? `📍 Departing (Stop ${activeLegIndex + 1} of ${totalLegs + 1})`
-                : `🎯 Destination (Stop ${activeLegIndex + 2} of ${totalLegs + 1})`}
+                : `🎯 En Route (Stop ${activeLegIndex + 2} of ${totalLegs + 1})`}
             </div>
             <div
               style={{
@@ -1169,6 +1312,201 @@ export function MapboxGlobe({
             <div style={{ fontSize: "11px", color: "#94a3b8" }}>
               {currentStop.country} · <span style={{ color: "#38bdf8", fontWeight: 700 }}>{currentStop.code}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cinematic Arrival Photo Showcase (Shows 2-3 Pictures upon Reaching Each Stop) */}
+      {!hideOverlays && isArrival && arrivalStop && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "22px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "min(460px, calc(100% - 32px))",
+            borderRadius: "22px",
+            background: "rgba(3, 16, 29, 0.95)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            border: "1.5px solid rgba(56, 189, 248, 0.7)",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.85), 0 0 25px rgba(56, 189, 248, 0.4)",
+            padding: "14px 16px",
+            zIndex: 40,
+            color: "#ffffff",
+            animation: "fadeIn 0.3s ease-out",
+          }}
+        >
+          {/* Top Arrival Header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  fontSize: "10px",
+                  fontWeight: 800,
+                  color: "#38bdf8",
+                  background: "rgba(56, 189, 248, 0.15)",
+                  border: "1px solid rgba(56, 189, 248, 0.4)",
+                  padding: "3px 8px",
+                  borderRadius: "20px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                <span
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: "#38bdf8",
+                    display: "inline-block",
+                    boxShadow: "0 0 8px #38bdf8",
+                  }}
+                />
+                Arrived · Stop {activeLegIndex + 2} of {totalLegs + 1}
+              </span>
+              <span style={{ fontSize: "11px", color: "#94a3b8" }}>{arrivalStop.country}</span>
+            </div>
+            <span
+              style={{
+                fontSize: "10px",
+                fontWeight: 800,
+                background: "#0284c7",
+                color: "#ffffff",
+                padding: "2px 7px",
+                borderRadius: "8px",
+              }}
+            >
+              {arrivalStop.code}
+            </span>
+          </div>
+
+          <div style={{ fontSize: "18px", fontWeight: 700, fontFamily: "Georgia, serif", marginBottom: "10px" }}>
+            {arrivalStop.name}
+          </div>
+
+          {/* Large Hero Featured Photo with Transition */}
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              height: "175px",
+              borderRadius: "14px",
+              overflow: "hidden",
+              marginBottom: "10px",
+              border: "1.5px solid rgba(255, 255, 255, 0.2)",
+            }}
+          >
+            <img
+              src={arrivalImages[activePhotoIndex] || arrivalStop.imageUrl}
+              alt={`${arrivalStop.name} photo ${activePhotoIndex + 1}`}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transition: "opacity 0.4s ease-in-out",
+                display: "block",
+              }}
+            />
+            {/* Photo Index Tag */}
+            <div
+              style={{
+                position: "absolute",
+                top: "10px",
+                right: "10px",
+                background: "rgba(3, 16, 29, 0.85)",
+                backdropFilter: "blur(8px)",
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                color: "#ffffff",
+                fontSize: "11px",
+                fontWeight: 700,
+                padding: "3px 8px",
+                borderRadius: "12px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+              }}
+            >
+              📸 Photo {activePhotoIndex + 1} of {Math.max(1, arrivalImages.length)}
+            </div>
+
+            {arrivalStop.description && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  padding: "8px 12px",
+                  background: "linear-gradient(to top, rgba(3, 16, 29, 0.92) 0%, rgba(3, 16, 29, 0) 100%)",
+                  fontSize: "12px",
+                  color: "#e2e8f0",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {arrivalStop.description}
+              </div>
+            )}
+          </div>
+
+          {/* 3 Photos Thumbnail Selector & Indicator Bar */}
+          {arrivalImages.length > 1 && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              {arrivalImages.slice(0, 3).map((imgUrl, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    flex: 1,
+                    position: "relative",
+                    height: "44px",
+                    borderRadius: "8px",
+                    overflow: "hidden",
+                    border: idx === activePhotoIndex ? "2px solid #38bdf8" : "1.5px solid rgba(255, 255, 255, 0.2)",
+                    boxShadow: idx === activePhotoIndex ? "0 0 12px rgba(56, 189, 248, 0.8)" : "none",
+                    transform: idx === activePhotoIndex ? "scale(1.03)" : "scale(1.0)",
+                    transition: "all 0.25s ease",
+                    opacity: idx === activePhotoIndex ? 1 : 0.65,
+                  }}
+                >
+                  <img src={imgUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  {idx === activePhotoIndex && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 0,
+                        left: 0,
+                        height: "3px",
+                        width: "100%",
+                        background: "#38bdf8",
+                        boxShadow: "0 0 6px #38bdf8",
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Continuing indicator */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: "8px",
+              fontSize: "11px",
+              color: "#94a3b8",
+            }}
+          >
+            <span>
+              {activeLegIndex + 1 < totalLegs
+                ? `Continuing to ${locations[activeLegIndex + 2]?.name || "next stop"}...`
+                : "Journey route complete!"}
+            </span>
+            <span style={{ color: "#38bdf8", fontWeight: 600 }}>3D Tour Active</span>
           </div>
         </div>
       )}

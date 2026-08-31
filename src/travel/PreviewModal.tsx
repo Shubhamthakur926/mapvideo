@@ -391,7 +391,9 @@ export function PreviewModal({
   const [muted, setMuted] = useState(false);
 
   const totalLegs = Math.max(1, locations.length - 1);
-  const totalJourneyDuration = duration * 1000;
+  const SECONDS_PER_LEG = 4; // Exactly 4 seconds between each stop
+  const totalJourneyDuration = totalLegs * SECONDS_PER_LEG * 1000;
+  const effectiveDurationSec = totalLegs * SECONDS_PER_LEG;
   const totalPlaybackDuration = INTRO_DURATION_MS + totalJourneyDuration + SUMMARY_DURATION_MS + OUTRO_DURATION_MS;
 
   // Timestamps
@@ -427,7 +429,7 @@ export function PreviewModal({
 
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
-  const elapsedSec = Math.min(duration, Math.floor((internalProgress / 100) * duration));
+  const elapsedSec = Math.min(effectiveDurationSec, Math.floor((internalProgress / 100) * effectiveDurationSec));
 
   const journeyIsPlaying = playing && isJourney;
 
@@ -631,7 +633,7 @@ export function PreviewModal({
         const arrivalStop = locations[legIdx + 1] || locations[locations.length - 1];
         const arrivalImages = getLocationImages(arrivalStop);
         const photoIdx = Math.min(2, Math.floor(((legFraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT)) * 3));
-        const curSec = Math.floor(currentP * duration);
+        const curSec = Math.floor(currentP * effectiveDurationSec);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
         const activeMap = frame.current?.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapCanvas;

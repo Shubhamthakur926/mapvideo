@@ -225,19 +225,31 @@ function drawTravelSummaryCard(
     ctx.fillText(stat.val, sx + statW / 2, statBoxY + 58);
   });
 
-  // Stops list container
+  // Stops list container - DYNAMIC height based on number of locations
   const stopsListY = 338;
-  const stopsListH = 645;
-  drawRoundedRect(ctx, 90, stopsListY, 900, stopsListH, 22, "#f8fafc", "#e2e8f0", 1.5);
+  const maxStopsListH = 645;
+  
+  // Calculate how many stops can fit with adaptive row height
+  const headerHeight = 45;
+  const minRowHeight = 52;
+  const maxRowHeight = 84;
+  
+  // Calculate optimal row height based on number of locations
+  const availableHeight = maxStopsListH - headerHeight - 10;
+  const calculatedRowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableHeight / locations.length));
+  const totalStopsHeight = Math.min(maxStopsListH, headerHeight + 10 + (locations.length * calculatedRowH));
+  
+  drawRoundedRect(ctx, 90, stopsListY, 900, totalStopsHeight, 22, "#f8fafc", "#e2e8f0", 1.5);
 
   ctx.textAlign = "left";
   ctx.fillStyle = "#1e293b";
   ctx.font = "800 14px system-ui, sans-serif";
-  ctx.fillText("📍 ALL DESTINATIONS & CONNECTING ROUTES", 120, stopsListY + 32);
+  ctx.fillText(`📍 ALL ${locations.length} DESTINATIONS & CONNECTING ROUTES`, 120, stopsListY + 32);
 
-  // Render list of stops
-  const displayStops = locations.slice(0, 6);
-  const rowH = Math.min(84, (stopsListH - 65) / displayStops.length);
+  // Render ALL stops with adaptive sizing
+  const displayStops = locations; // Show ALL locations
+  const availableRowHeight = totalStopsHeight - headerHeight - 10;
+  const rowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableRowHeight / displayStops.length));
   const startRowY = stopsListY + 55;
 
   displayStops.forEach((loc, i) => {
@@ -245,54 +257,79 @@ function drawTravelSummaryCard(
     const isFirst = i === 0;
     const isLast = i === locations.length - 1;
 
-    // Row card
-    drawRoundedRect(ctx, 115, ry, 850, rowH - 8, 14, "#ffffff", isLast ? "#86efac" : isFirst ? "#bae6fd" : "#e2e8f0", 1.5);
+    // Row card with reduced padding for many stops
+    const rowPadding = locations.length > 10 ? 4 : 8;
+    drawRoundedRect(ctx, 115, ry, 850, rowH - rowPadding, 14, "#ffffff", isLast ? "#86efac" : isFirst ? "#bae6fd" : "#e2e8f0", 1.5);
 
-    // Stop number circle
+    // Stop number circle - adaptive size
+    const circleSize = locations.length > 12 ? 24 : locations.length > 8 ? 28 : 34;
+    const circleX = 130;
+    const circleY = ry + (rowH - rowPadding - circleSize) / 2;
     const numColor = isLast ? "#16a34a" : isFirst ? "#0284c7" : "#475569";
-    drawRoundedRect(ctx, 130, ry + (rowH - 8 - 34) / 2, 34, 34, 17, numColor);
+    drawRoundedRect(ctx, circleX, circleY, circleSize, circleSize, circleSize / 2, numColor);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ffffff";
-    ctx.font = "800 14px system-ui, sans-serif";
-    ctx.fillText(`${i + 1}`, 147, ry + (rowH - 8) / 2);
+    const circleFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 11 : 14;
+    ctx.font = `800 ${circleFontSize}px system-ui, sans-serif`;
+    ctx.fillText(`${i + 1}`, circleX + circleSize / 2, circleY + circleSize / 2);
 
-    // Stop thumbnail image if preloaded
+    // Stop thumbnail image - adaptive size
     const img = preloadedImgs.get(loc.imageUrl || "");
+    const thumbSize = locations.length > 12 ? 32 : locations.length > 8 ? 40 : 48;
     if (img) {
-      drawRoundedImage(ctx, img, 178, ry + (rowH - 8 - 48) / 2, 60, 48, 8);
+      drawRoundedImage(ctx, img, 178, ry + (rowH - rowPadding - thumbSize) / 2, thumbSize, thumbSize, 6);
     }
 
-    // Stop Name & Country
-    const textStartX = img ? 250 : 180;
+    // Stop Name & Country - adaptive font sizes
+    const textStartX = img ? 178 + thumbSize + 10 : 180;
+    const nameFontSize = locations.length > 12 ? 12 : locations.length > 8 ? 14 : 17;
+    const countryFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 10 : 12;
+    
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#0f172a";
-    ctx.font = "700 17px Georgia, serif";
-    ctx.fillText(loc.name, textStartX, ry + 12);
+    ctx.font = `700 ${nameFontSize}px system-ui, sans-serif`;
+    
+    // Truncate long names to prevent overflow
+    const maxNameWidth = locations.length > 12 ? 120 : 200;
+    let displayName = loc.name;
+    if (ctx.measureText(displayName).width > maxNameWidth) {
+      while (ctx.measureText(displayName + "...").width > maxNameWidth && displayName.length > 1) {
+        displayName = displayName.slice(0, -1);
+      }
+      displayName += "...";
+    }
+    ctx.fillText(displayName, textStartX, ry + 6);
 
     ctx.fillStyle = "#64748b";
-    ctx.font = "600 12px system-ui, sans-serif";
-    ctx.fillText(`${loc.country} · ${loc.code}`, textStartX, ry + 36);
+    ctx.font = `600 ${countryFontSize}px system-ui, sans-serif`;
+    ctx.fillText(`${loc.country} · ${loc.code}`, textStartX, ry + 6 + nameFontSize + 2);
 
-    // Connecting Transport or Arrival badge
+    // Connecting Transport or Arrival badge - adaptive size
+    const badgeWidth = locations.length > 12 ? 120 : locations.length > 8 ? 150 : 175;
+    const badgeHeight = locations.length > 12 ? 20 : locations.length > 8 ? 24 : 28;
+    const badgeFontSize = locations.length > 12 ? 8 : locations.length > 8 ? 9 : 11;
+    const badgeX = 950 - badgeWidth - 20;
+    
     if (i < locations.length - 1) {
       const legTransport = legs[i] || "flight";
       const tEmoji = vehicleMarks[legTransport] || "✈️";
       const tLabel = legTransport.toUpperCase();
-      drawRoundedRect(ctx, 770, ry + (rowH - 8 - 28) / 2, 175, 28, 14, "#e0f2fe", "#bae6fd", 1);
+      drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#e0f2fe", "#bae6fd", 1);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#0369a1";
-      ctx.font = "800 11px system-ui, sans-serif";
-      ctx.fillText(`${tEmoji} Next: ${tLabel}`, 857, ry + (rowH - 8) / 2);
+      ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
+      const badgeText = locations.length > 12 ? `${tEmoji} ${tLabel}` : `${tEmoji} Next: ${tLabel}`;
+      ctx.fillText(badgeText, badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
     } else {
-      drawRoundedRect(ctx, 770, ry + (rowH - 8 - 28) / 2, 175, 28, 14, "#dcfce7", "#86efac", 1);
+      drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#dcfce7", "#86efac", 1);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#15803d";
-      ctx.font = "800 11px system-ui, sans-serif";
-      ctx.fillText("🏁 Final Destination", 857, ry + (rowH - 8) / 2);
+      ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
+      ctx.fillText("🏁 Final", badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
     }
   });
 

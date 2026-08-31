@@ -19,6 +19,8 @@ const vehicleMarks: Record<Transport, string> = {
 
 const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
 const BACKGROUND_MUSIC_VOLUME = 0.6;
+const BRAND_LOGO_URL = "/picture/App-logo.png";
+const BRAND_CARD_DURATION_MS = 2000;
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
 function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
@@ -94,6 +96,41 @@ function drawRoundedImage(
   ctx.restore();
 }
 
+function drawBrandingCard(
+  ctx: CanvasRenderingContext2D,
+  logo: HTMLImageElement | undefined,
+  title: string,
+  subtitle: string,
+  opacity: number
+) {
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.fillStyle = "rgba(2, 12, 27, 0.88)";
+  ctx.fillRect(0, 0, 1080, 1080);
+
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = 28;
+  drawRoundedRect(ctx, 290, 190, 500, 700, 36, "#ffffff");
+  ctx.shadowBlur = 0;
+
+  if (logo) {
+    drawRoundedImage(ctx, logo, 350, 245, 380, 380, 26);
+  }
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#0f2d5c";
+  ctx.font = "800 18px system-ui, sans-serif";
+  ctx.fillText("ROAMLY STUDIO", 540, 680);
+  ctx.fillStyle = "#102a4f";
+  ctx.font = "700 36px Georgia, serif";
+  ctx.fillText(title, 540, 735);
+  ctx.fillStyle = "#5b6b83";
+  ctx.font = "600 17px system-ui, sans-serif";
+  ctx.fillText(subtitle, 540, 785);
+  ctx.restore();
+}
+
 // Preload images into memory for smooth video generation
 async function preloadImages(urls: string[]): Promise<Map<string, HTMLImageElement>> {
   const map = new Map<string, HTMLImageElement>();
@@ -141,8 +178,9 @@ export function PreviewModal({
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [internalProgress, setInternalProgress] = useState(0);
+  // Opening the journey preview starts the intro card automatically.
+  const [playing, setPlaying] = useState(true);
+  const [timelineElapsed, setTimelineElapsed] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [recording, setRecording] = useState(false);
   const [recordProgress, setRecordProgress] = useState(0);
@@ -150,6 +188,11 @@ export function PreviewModal({
   
   const totalLegs = Math.max(1, locations.length - 1);
   const totalDuration = duration * 1000;
+  const totalPlaybackDuration = totalDuration + BRAND_CARD_DURATION_MS * 2;
+  const isIntro = timelineElapsed < BRAND_CARD_DURATION_MS;
+  const isOutro = timelineElapsed >= BRAND_CARD_DURATION_MS + totalDuration;
+  const journeyElapsed = Math.min(totalDuration, Math.max(0, timelineElapsed - BRAND_CARD_DURATION_MS));
+  const internalProgress = totalDuration > 0 ? (journeyElapsed / totalDuration) * 100 : 0;
   const totalTripDistance = useMemo(
     () =>
       formatDistanceKm(
@@ -163,6 +206,15 @@ export function PreviewModal({
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
   const elapsedSec = Math.min(duration, Math.floor((internalProgress / 100) * duration));
+  const previewBranding = isIntro
+      ? {
+          title: "Your journey starts here",
+          subtitle: `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
+        }
+      : isOutro
+      ? { title: "Journey complete", subtitle: "Thanks for travelling with us" }
+      : null;
+  const journeyIsPlaying = playing && !isIntro && !isOutro;
 
   // Close on Escape key press
   useEffect(() => {
@@ -179,12 +231,17 @@ export function PreviewModal({
   useEffect(() => {
     if (!playing || recording) return;
     const intervalMs = 30;
-    const step = (intervalMs / totalDuration) * 100;
     const timer = window.setInterval(() => {
-      setInternalProgress((value) => (value >= 100 ? 0 : value + step));
+      setTimelineElapsed((value) => Math.min(totalPlaybackDuration, value + intervalMs));
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [playing, totalDuration, recording]);
+  }, [playing, totalPlaybackDuration, recording]);
+
+  useEffect(() => {
+    if (playing && !recording && timelineElapsed >= totalPlaybackDuration) {
+      setPlaying(false);
+    }
+  }, [playing, recording, timelineElapsed, totalPlaybackDuration]);
 
 
   // Keep one background track aligned with preview playback.
@@ -204,9 +261,9 @@ export function PreviewModal({
       audio.load();
     }
 
-    if (playing) playPreviewAudio(audio);
+    if (journeyIsPlaying) playPreviewAudio(audio);
     else audio.pause();
-  }, [muted, playing, recording]);
+  }, [journeyIsPlaying, muted, recording]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -227,10 +284,9 @@ export function PreviewModal({
       audioRef.current.currentTime = 0;
       audioRef.current.load();
     }
-    setInternalProgress(0);
+    setTimelineElapsed(0);
     setRestartKey((value) => value + 1);
     setPlaying(true);
-    if (audioRef.current) playPreviewAudio(audioRef.current);
   };
 
   const togglePlayback = () => {
@@ -239,8 +295,8 @@ export function PreviewModal({
       setPlaying(false);
       audioRef.current?.pause();
     } else {
+      if (timelineElapsed >= totalPlaybackDuration) setTimelineElapsed(0);
       setPlaying(true);
-      if (audioRef.current) playPreviewAudio(audioRef.current);
     }
   };
 
@@ -262,11 +318,15 @@ export function PreviewModal({
     }
 
     // 1. Preload all destination landmark photos into memory
-    const allPhotoUrls = locations.flatMap((loc) => [loc.imageUrl || "", ...getLocationImages(loc)]);
+    const allPhotoUrls = [
+      ...locations.flatMap((loc) => [loc.imageUrl || "", ...getLocationImages(loc)]),
+      BRAND_LOGO_URL,
+    ];
     const preloadedImgs = await preloadImages(allPhotoUrls.filter(Boolean));
 
     setRecording(true);
     setRecordProgress(0);
+    setTimelineElapsed(0);
     setPlaying(false);
     audioRef.current?.pause();
 
@@ -297,8 +357,8 @@ export function PreviewModal({
       source.loop = true;
       gain.gain.value = BACKGROUND_MUSIC_VOLUME;
       source.connect(gain).connect(audioDestination);
-      source.start(audioStartTime);
-      source.stop(audioStartTime + totalDuration / 1000);
+      source.start(audioStartTime + BRAND_CARD_DURATION_MS / 1000);
+      source.stop(audioStartTime + (BRAND_CARD_DURATION_MS + totalDuration) / 1000);
     } catch (error) {
       console.warn("Unable to prepare background music for export.", error);
     }
@@ -325,19 +385,23 @@ export function PreviewModal({
 
     recorder.start();
 
-    // 3. Run synchronized recording loop with dynamic duration (min 20s, max 4 min)
-    const length = duration * 1000;
+    // 3. Record the 2-second logo intro, the full journey, and the 2-second logo outro.
+    const length = totalPlaybackDuration;
     const started = performance.now();
 
     await new Promise<void>((resolve) => {
       const anim = (now: number) => {
         const elapsed = now - started;
-        const currentP = Math.min(elapsed / length, 0.999999);
+        const journeyFrameElapsed = Math.min(
+          totalDuration,
+          Math.max(0, elapsed - BRAND_CARD_DURATION_MS)
+        );
+        const currentP = totalDuration > 0 ? journeyFrameElapsed / totalDuration : 0;
         const curProgressPercent = currentP * 100;
 
         // Drive Preview player state frame-by-frame
-        setInternalProgress(curProgressPercent);
-        setRecordProgress(Math.min(100, Math.round(curProgressPercent)));
+        setTimelineElapsed(Math.min(elapsed, length));
+        setRecordProgress(Math.min(100, Math.round((elapsed / length) * 100)));
 
         // Calculate exact arrival and motion state
         const scaled = currentP * totalLegs;
@@ -545,6 +609,22 @@ export function PreviewModal({
         ctx.fillRect(60, 1052, 960 * currentP, 4);
         ctx.restore();
 
+        const isOpening = elapsed < BRAND_CARD_DURATION_MS;
+        const isClosing = elapsed >= length - BRAND_CARD_DURATION_MS;
+        if (isOpening || isClosing) {
+          const phaseElapsed = isOpening ? elapsed : elapsed - (length - BRAND_CARD_DURATION_MS);
+          const opacity = Math.min(1, Math.max(0, phaseElapsed / 260));
+          drawBrandingCard(
+            ctx,
+            preloadedImgs.get(BRAND_LOGO_URL),
+            isOpening ? "Your journey starts here" : "Journey complete",
+            isOpening
+              ? `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`
+              : "Thanks for travelling with us",
+            opacity
+          );
+        }
+
         if (elapsed < length) {
           requestAnimationFrame(anim);
         } else {
@@ -579,7 +659,7 @@ export function PreviewModal({
     window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 
     setRecording(false);
-    setPlaying(true);
+    setPlaying(false);
   };
 
   // Auto-record if triggered from main page
@@ -655,9 +735,20 @@ export function PreviewModal({
           legs={legs}
           progress={internalProgress / 100}
           activeLocation={destination}
-          playing={playing || recording}
+          playing={journeyIsPlaying || recording}
           className="map-video-globe"
         />
+
+        {previewBranding && (
+          <div className="video-branding-card" aria-live="polite">
+            <div className="video-branding-content">
+              <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
+              <span>ROAMLY STUDIO</span>
+              <strong>{previewBranding.title}</strong>
+              <small>{previewBranding.subtitle}</small>
+            </div>
+          </div>
+        )}
 
         <div className="video-controls">
           <div className="video-progress" aria-label="Video progress">

@@ -25,6 +25,58 @@
   position: absolute;
   inset: 0;
 }
+.video-branding-card {
+  position: absolute;
+  inset: 0;
+  z-index: 101;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 12, 27, 0.88);
+  animation: video-branding-in 0.26s ease-out;
+  pointer-events: none;
+}
+.video-branding-content {
+  display: flex;
+  width: min(420px, 82%);
+  min-height: 470px;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  padding: 34px;
+  border-radius: 28px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+.video-branding-content img {
+  width: min(260px, 72vw);
+  max-height: 260px;
+  margin-bottom: 22px;
+  border-radius: 18px;
+  object-fit: contain;
+}
+.video-branding-content span {
+  color: #0f2d5c;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.video-branding-content strong {
+  margin-top: 16px;
+  color: #102a4f;
+  font: 700 clamp(24px, 4vw, 34px) Georgia, serif;
+}
+.video-branding-content small {
+  margin-top: 12px;
+  color: #5b6b83;
+  font-size: 14px;
+  font-weight: 600;
+}
+@keyframes video-branding-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .map-video .close-video-button {
   position: absolute;
   top: 16px;

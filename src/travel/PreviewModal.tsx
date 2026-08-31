@@ -20,7 +20,13 @@ const vehicleMarks: Record<Transport, string> = {
 const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
 const BACKGROUND_MUSIC_VOLUME = 0.6;
 const BRAND_LOGO_URL = "/picture/App-logo.png";
-const BRAND_CARD_DURATION_MS = 2000;
+
+// Stage Durations
+const INTRO_DURATION_MS = 2500;
+const SUMMARY_DURATION_MS = 3600;
+const OUTRO_DURATION_MS = 2500;
+const FADE_TRANSITION_MS = 500;
+
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
 function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
@@ -41,6 +47,25 @@ function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<Audi
 function playPreviewAudio(audio: HTMLAudioElement) {
   void audio.play().catch((error) => console.warn("Vehicle sound autoplay was blocked.", error));
 }
+
+// Calculate smooth fade-in and fade-out opacity envelope (0 -> 1 -> 0)
+function getFadeOpacity(
+  elapsedInPhase: number,
+  phaseDuration: number,
+  fadeInDuration = FADE_TRANSITION_MS,
+  fadeOutDuration = FADE_TRANSITION_MS
+): number {
+  if (elapsedInPhase < 0 || elapsedInPhase > phaseDuration) return 0;
+  if (elapsedInPhase < fadeInDuration) {
+    return Math.min(1, Math.max(0, elapsedInPhase / fadeInDuration));
+  }
+  const timeRemaining = phaseDuration - elapsedInPhase;
+  if (timeRemaining < fadeOutDuration) {
+    return Math.min(1, Math.max(0, timeRemaining / fadeOutDuration));
+  }
+  return 1;
+}
+
 // Canvas drawing helper for rounded rectangles
 function drawRoundedRect(
   ctx: CanvasRenderingContext2D,
@@ -103,9 +128,10 @@ function drawBrandingCard(
   subtitle: string,
   opacity: number
 ) {
+  if (opacity <= 0.001) return;
   ctx.save();
   ctx.globalAlpha = opacity;
-  ctx.fillStyle = "rgba(2, 12, 27, 0.88)";
+  ctx.fillStyle = "rgba(2, 12, 27, 0.92)";
   ctx.fillRect(0, 0, 1080, 1080);
 
   ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
@@ -128,6 +154,185 @@ function drawBrandingCard(
   ctx.fillStyle = "#5b6b83";
   ctx.font = "600 17px system-ui, sans-serif";
   ctx.fillText(subtitle, 540, 785);
+  ctx.restore();
+}
+
+function drawTravelSummaryCard(
+  ctx: CanvasRenderingContext2D,
+  locations: Location[],
+  legs: Transport[],
+  totalTripDistance: string,
+  preloadedImgs: Map<string, HTMLImageElement>,
+  opacity: number
+) {
+  if (opacity <= 0.001) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+
+  // Dark background overlay
+  ctx.fillStyle = "rgba(2, 12, 27, 0.94)";
+  ctx.fillRect(0, 0, 1080, 1080);
+
+  // Main container card
+  ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+  ctx.shadowBlur = 36;
+  drawRoundedRect(ctx, 60, 60, 960, 960, 32, "#ffffff");
+  ctx.shadowBlur = 0;
+
+  // Header Title
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#0284c7";
+  ctx.font = "800 15px system-ui, sans-serif";
+  ctx.fillText("✨ TRAVEL SUMMARY · ITINERARY RECAP", 540, 115);
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "700 36px Georgia, serif";
+  const startLoc = locations[0]?.name || "Start";
+  const endLoc = locations[locations.length - 1]?.name || "Destination";
+  ctx.fillText(`${startLoc} → ${endLoc}`, 540, 160);
+
+  ctx.fillStyle = "#64748b";
+  ctx.font = "600 15px system-ui, sans-serif";
+  ctx.fillText("Complete journey overview & route statistics", 540, 198);
+
+  // 4 Key Statistics Cards in a grid row
+  const statBoxY = 230;
+  const statW = 205;
+  const statH = 88;
+  const statGap = 16;
+  const statStartX = 540 - (4 * statW + 3 * statGap) / 2;
+
+  const distinctTransports = Array.from(new Set(legs)).map((l) => vehicleMarks[l] || "✈️");
+
+  const stats = [
+    { label: "TOTAL DISTANCE", val: totalTripDistance, icon: "🌍" },
+    { label: "DESTINATIONS", val: `${locations.length} Cities`, icon: "📍" },
+    { label: "ROUTE LEGS", val: `${Math.max(1, locations.length - 1)} Legs`, icon: "🗺️" },
+    { label: "TRANSPORTS", val: distinctTransports.join(" ") || "✈️", icon: "🚀" },
+  ];
+
+  stats.forEach((stat, idx) => {
+    const sx = statStartX + idx * (statW + statGap);
+    drawRoundedRect(ctx, sx, statBoxY, statW, statH, 16, "#f8fafc", "#e2e8f0", 1.5);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#0284c7";
+    ctx.font = "800 11px system-ui, sans-serif";
+    ctx.fillText(`${stat.icon} ${stat.label}`, sx + statW / 2, statBoxY + 28);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "700 18px Georgia, serif";
+    ctx.fillText(stat.val, sx + statW / 2, statBoxY + 58);
+  });
+
+  // Stops list container - DYNAMIC height based on number of locations
+  const stopsListY = 338;
+  const maxStopsListH = 645;
+  
+  // Calculate how many stops can fit with adaptive row height
+  const headerHeight = 45;
+  const minRowHeight = 52;
+  const maxRowHeight = 84;
+  
+  // Calculate optimal row height based on number of locations
+  const availableHeight = maxStopsListH - headerHeight - 10;
+  const calculatedRowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableHeight / locations.length));
+  const totalStopsHeight = Math.min(maxStopsListH, headerHeight + 10 + (locations.length * calculatedRowH));
+  
+  drawRoundedRect(ctx, 90, stopsListY, 900, totalStopsHeight, 22, "#f8fafc", "#e2e8f0", 1.5);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#1e293b";
+  ctx.font = "800 14px system-ui, sans-serif";
+  ctx.fillText(`📍 ALL ${locations.length} DESTINATIONS & CONNECTING ROUTES`, 120, stopsListY + 32);
+
+  // Render ALL stops with adaptive sizing
+  const displayStops = locations; // Show ALL locations
+  const availableRowHeight = totalStopsHeight - headerHeight - 10;
+  const rowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableRowHeight / displayStops.length));
+  const startRowY = stopsListY + 55;
+
+  displayStops.forEach((loc, i) => {
+    const ry = startRowY + i * rowH;
+    const isFirst = i === 0;
+    const isLast = i === locations.length - 1;
+
+    // Row card with reduced padding for many stops
+    const rowPadding = locations.length > 10 ? 4 : 8;
+    drawRoundedRect(ctx, 115, ry, 850, rowH - rowPadding, 14, "#ffffff", isLast ? "#86efac" : isFirst ? "#bae6fd" : "#e2e8f0", 1.5);
+
+    // Stop number circle - adaptive size
+    const circleSize = locations.length > 12 ? 24 : locations.length > 8 ? 28 : 34;
+    const circleX = 130;
+    const circleY = ry + (rowH - rowPadding - circleSize) / 2;
+    const numColor = isLast ? "#16a34a" : isFirst ? "#0284c7" : "#475569";
+    drawRoundedRect(ctx, circleX, circleY, circleSize, circleSize, circleSize / 2, numColor);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
+    const circleFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 11 : 14;
+    ctx.font = `800 ${circleFontSize}px system-ui, sans-serif`;
+    ctx.fillText(`${i + 1}`, circleX + circleSize / 2, circleY + circleSize / 2);
+
+    // Stop thumbnail image - adaptive size
+    const img = preloadedImgs.get(loc.imageUrl || "");
+    const thumbSize = locations.length > 12 ? 32 : locations.length > 8 ? 40 : 48;
+    if (img) {
+      drawRoundedImage(ctx, img, 178, ry + (rowH - rowPadding - thumbSize) / 2, thumbSize, thumbSize, 6);
+    }
+
+    // Stop Name & Country - adaptive font sizes
+    const textStartX = img ? 178 + thumbSize + 10 : 180;
+    const nameFontSize = locations.length > 12 ? 12 : locations.length > 8 ? 14 : 17;
+    const countryFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 10 : 12;
+    
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `700 ${nameFontSize}px system-ui, sans-serif`;
+    
+    // Truncate long names to prevent overflow
+    const maxNameWidth = locations.length > 12 ? 120 : 200;
+    let displayName = loc.name;
+    if (ctx.measureText(displayName).width > maxNameWidth) {
+      while (ctx.measureText(displayName + "...").width > maxNameWidth && displayName.length > 1) {
+        displayName = displayName.slice(0, -1);
+      }
+      displayName += "...";
+    }
+    ctx.fillText(displayName, textStartX, ry + 6);
+
+    ctx.fillStyle = "#64748b";
+    ctx.font = `600 ${countryFontSize}px system-ui, sans-serif`;
+    ctx.fillText(`${loc.country} · ${loc.code}`, textStartX, ry + 6 + nameFontSize + 2);
+
+    // Connecting Transport or Arrival badge - adaptive size
+    const badgeWidth = locations.length > 12 ? 120 : locations.length > 8 ? 150 : 175;
+    const badgeHeight = locations.length > 12 ? 20 : locations.length > 8 ? 24 : 28;
+    const badgeFontSize = locations.length > 12 ? 8 : locations.length > 8 ? 9 : 11;
+    const badgeX = 950 - badgeWidth - 20;
+    
+    if (i < locations.length - 1) {
+      const legTransport = legs[i] || "flight";
+      const tEmoji = vehicleMarks[legTransport] || "✈️";
+      const tLabel = legTransport.toUpperCase();
+      drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#e0f2fe", "#bae6fd", 1);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#0369a1";
+      ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
+      const badgeText = locations.length > 12 ? `${tEmoji} ${tLabel}` : `${tEmoji} Next: ${tLabel}`;
+      ctx.fillText(badgeText, badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
+    } else {
+      drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#dcfce7", "#86efac", 1);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#15803d";
+      ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
+      ctx.fillText("🏁 Final", badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
+    }
+  });
+
   ctx.restore();
 }
 
@@ -178,43 +383,53 @@ export function PreviewModal({
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Opening the journey preview starts the intro card automatically.
   const [playing, setPlaying] = useState(true);
   const [timelineElapsed, setTimelineElapsed] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
   const [recording, setRecording] = useState(false);
   const [recordProgress, setRecordProgress] = useState(0);
   const [muted, setMuted] = useState(false);
-  
+
   const totalLegs = Math.max(1, locations.length - 1);
-  const totalDuration = duration * 1000;
-  const totalPlaybackDuration = totalDuration + BRAND_CARD_DURATION_MS * 2;
-  const isIntro = timelineElapsed < BRAND_CARD_DURATION_MS;
-  const isOutro = timelineElapsed >= BRAND_CARD_DURATION_MS + totalDuration;
-  const journeyElapsed = Math.min(totalDuration, Math.max(0, timelineElapsed - BRAND_CARD_DURATION_MS));
-  const internalProgress = totalDuration > 0 ? (journeyElapsed / totalDuration) * 100 : 0;
+  const totalJourneyDuration = duration * 1000;
+  const totalPlaybackDuration = INTRO_DURATION_MS + totalJourneyDuration + SUMMARY_DURATION_MS + OUTRO_DURATION_MS;
+
+  // Timestamps
+  const journeyStartTime = INTRO_DURATION_MS;
+  const summaryStartTime = journeyStartTime + totalJourneyDuration;
+  const outroStartTime = summaryStartTime + SUMMARY_DURATION_MS;
+
+  // Active Phase Checks
+  const isIntro = timelineElapsed < journeyStartTime;
+  const isJourney = timelineElapsed >= journeyStartTime && timelineElapsed < summaryStartTime;
+  const isSummary = timelineElapsed >= summaryStartTime && timelineElapsed < outroStartTime;
+  const isOutro = timelineElapsed >= outroStartTime;
+
+  // Smooth Opacity Envelopes (Fade In & Fade Out)
+  const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS) : 0;
+  const summaryOpacity = isSummary ? getFadeOpacity(timelineElapsed - summaryStartTime, SUMMARY_DURATION_MS) : 0;
+  const outroOpacity = isOutro ? getFadeOpacity(timelineElapsed - outroStartTime, OUTRO_DURATION_MS) : 0;
+
+  // Journey internal progress [0 to 100]
+  const journeyElapsed = Math.min(totalJourneyDuration, Math.max(0, timelineElapsed - journeyStartTime));
+  const internalProgress = totalJourneyDuration > 0 ? (journeyElapsed / totalJourneyDuration) * 100 : 0;
+
   const totalTripDistance = useMemo(
     () =>
       formatDistanceKm(
         locations.slice(1).reduce(
-          (total, destination, index) => total + calculateDistanceKm(locations[index], destination),
+          (total, dest, index) => total + calculateDistanceKm(locations[index], dest),
           0
         )
       ),
     [locations]
   );
+
   const currentLegIndex = Math.min(totalLegs - 1, Math.floor((internalProgress / 100) * totalLegs));
   const destination = locations[currentLegIndex + 1] ?? locations.at(-1)!;
   const elapsedSec = Math.min(duration, Math.floor((internalProgress / 100) * duration));
-  const previewBranding = isIntro
-      ? {
-          title: "Your journey starts here",
-          subtitle: `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
-        }
-      : isOutro
-      ? { title: "Journey complete", subtitle: "Thanks for travelling with us" }
-      : null;
-  const journeyIsPlaying = playing && !isIntro && !isOutro;
+
+  const journeyIsPlaying = playing && isJourney;
 
   // Close on Escape key press
   useEffect(() => {
@@ -243,8 +458,7 @@ export function PreviewModal({
     }
   }, [playing, recording, timelineElapsed, totalPlaybackDuration]);
 
-
-  // Keep one background track aligned with preview playback.
+  // Background music audio playback during preview
   useEffect(() => {
     if (recording) return;
 
@@ -261,9 +475,12 @@ export function PreviewModal({
       audio.load();
     }
 
-    if (journeyIsPlaying) playPreviewAudio(audio);
-    else audio.pause();
-  }, [journeyIsPlaying, muted, recording]);
+    if (playing && !isIntro) {
+      playPreviewAudio(audio);
+    } else {
+      audio.pause();
+    }
+  }, [playing, isIntro, muted, recording]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -302,7 +519,7 @@ export function PreviewModal({
 
   const fullscreen = () => frame.current?.requestFullscreen?.().catch(() => undefined);
 
-  // 100% Synchronized HD Video Generator & Downloader
+  // Synchronized HD Video Generator & Downloader with Intro, Journey, Summary & Outro
   const startDownloadRecording = async () => {
     if (locations.length < 2 || recording) return;
 
@@ -357,8 +574,8 @@ export function PreviewModal({
       source.loop = true;
       gain.gain.value = BACKGROUND_MUSIC_VOLUME;
       source.connect(gain).connect(audioDestination);
-      source.start(audioStartTime + BRAND_CARD_DURATION_MS / 1000);
-      source.stop(audioStartTime + (BRAND_CARD_DURATION_MS + totalDuration) / 1000);
+      source.start(audioStartTime + INTRO_DURATION_MS / 1000);
+      source.stop(audioStartTime + (totalPlaybackDuration) / 1000);
     } catch (error) {
       console.warn("Unable to prepare background music for export.", error);
     }
@@ -385,25 +602,25 @@ export function PreviewModal({
 
     recorder.start();
 
-    // 3. Record the 2-second logo intro, the full journey, and the 2-second logo outro.
+    // 3. Record Intro, Journey, Travel Summary, and Outro
     const length = totalPlaybackDuration;
     const started = performance.now();
 
     await new Promise<void>((resolve) => {
       const anim = (now: number) => {
         const elapsed = now - started;
-        const journeyFrameElapsed = Math.min(
-          totalDuration,
-          Math.max(0, elapsed - BRAND_CARD_DURATION_MS)
-        );
-        const currentP = totalDuration > 0 ? journeyFrameElapsed / totalDuration : 0;
-        const curProgressPercent = currentP * 100;
 
-        // Drive Preview player state frame-by-frame
+        // Drive player state frame-by-frame
         setTimelineElapsed(Math.min(elapsed, length));
         setRecordProgress(Math.min(100, Math.round((elapsed / length) * 100)));
 
-        // Calculate exact arrival and motion state
+        const recJourneyElapsed = Math.min(
+          totalJourneyDuration,
+          Math.max(0, elapsed - journeyStartTime)
+        );
+        const currentP = totalJourneyDuration > 0 ? recJourneyElapsed / totalJourneyDuration : 0;
+
+        // Calculate arrival and motion state
         const scaled = currentP * totalLegs;
         const legIdx = Math.min(totalLegs - 1, Math.floor(scaled));
         const legFraction = scaled - legIdx;
@@ -425,8 +642,8 @@ export function PreviewModal({
           ctx.fillRect(0, 0, 1080, 1080);
         }
 
-        // 2. Draw Moving Vehicle Marker & Destination Target Pill
-        if (!isArrival) {
+        // 2. Draw Moving Vehicle Marker & Destination Target Pill (during journey)
+        if (!isArrival && elapsed >= journeyStartTime && elapsed < summaryStartTime) {
           ctx.save();
           // Outer halo pulse
           ctx.beginPath();
@@ -457,7 +674,7 @@ export function PreviewModal({
           ctx.font = "700 15px system-ui, -apple-system, sans-serif";
           const textWidth = ctx.measureText(destNameText).width;
           const pillWidth = textWidth + 32;
-          
+
           drawRoundedRect(
             ctx,
             540 - pillWidth / 2,
@@ -469,7 +686,7 @@ export function PreviewModal({
             "#38bdf8",
             2
           );
-          
+
           ctx.fillStyle = "#ffffff";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -477,46 +694,46 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 3. Top-Left Active Status Banner
-        drawRoundedRect(ctx, 40, 40, 460, 110, 22, "rgba(3, 16, 29, 0.95)", "rgba(56, 189, 248, 0.75)", 2);
-        
-        // Thumbnail image in banner
-        const bannerImg = preloadedImgs.get(arrivalStop?.imageUrl || "");
-        if (bannerImg) {
-          drawRoundedImage(ctx, bannerImg, 56, 56, 76, 76, 14);
+        // 3. Top-Left Active Status Banner (during journey)
+        if (elapsed >= journeyStartTime && elapsed < summaryStartTime) {
+          drawRoundedRect(ctx, 40, 40, 460, 110, 22, "rgba(3, 16, 29, 0.95)", "rgba(56, 189, 248, 0.75)", 2);
+
+          const bannerImg = preloadedImgs.get(arrivalStop?.imageUrl || "");
+          if (bannerImg) {
+            drawRoundedImage(ctx, bannerImg, 56, 56, 76, 76, 14);
+          }
+
+          ctx.save();
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.fillStyle = "#38bdf8";
+          ctx.font = "800 13px system-ui, sans-serif";
+          ctx.fillText(
+            isArrival
+              ? `🎉 ARRIVED · STOP ${legIdx + 2} OF ${totalLegs + 1}`
+              : `🎯 EN ROUTE · STOP ${legIdx + 2} OF ${totalLegs + 1}`,
+            146,
+            56
+          );
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "700 24px Georgia, serif";
+          ctx.shadowColor = "rgba(0,0,0,0.9)";
+          ctx.shadowBlur = 8;
+          ctx.fillText(arrivalStop?.name || "Destination", 146, 76);
+          ctx.shadowBlur = 0;
+
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "700 13px system-ui, sans-serif";
+          ctx.fillText(`${arrivalStop?.country || ""} · ${arrivalStop?.code || ""}`, 146, 108);
+          ctx.restore();
         }
 
-        ctx.save();
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = "#38bdf8";
-        ctx.font = "800 13px system-ui, sans-serif";
-        ctx.fillText(
-          isArrival
-            ? `🎉 ARRIVED · STOP ${legIdx + 2} OF ${totalLegs + 1}`
-            : `🎯 EN ROUTE · STOP ${legIdx + 2} OF ${totalLegs + 1}`,
-          146,
-          56
-        );
-
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "700 24px Georgia, serif";
-        ctx.shadowColor = "rgba(0,0,0,0.9)";
-        ctx.shadowBlur = 8;
-        ctx.fillText(arrivalStop?.name || "Destination", 146, 76);
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = "#94a3b8";
-        ctx.font = "700 13px system-ui, sans-serif";
-        ctx.fillText(`${arrivalStop?.country || ""} · ${arrivalStop?.code || ""}`, 146, 108);
-        ctx.restore();
-
         // 4. Cinematic Arrival Photo Showcase Card (When Vehicle Arrives at Stop)
-        if (isArrival && arrivalStop) {
+        if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < summaryStartTime) {
           drawRoundedRect(ctx, 270, 390, 540, 530, 26, "rgba(3, 16, 29, 0.98)", "rgba(56, 189, 248, 0.85)", 3);
 
           ctx.save();
-          // Header Badge inside Card
           ctx.fillStyle = "#38bdf8";
           ctx.font = "800 14px system-ui, sans-serif";
           ctx.fillText(`✨ ARRIVED AT DESTINATION · STOP ${legIdx + 2} OF ${totalLegs + 1}`, 296, 412);
@@ -528,12 +745,10 @@ export function PreviewModal({
           ctx.fillText(arrivalStop.name, 296, 436);
           ctx.shadowBlur = 0;
 
-          // Country & Code Subtitle
           ctx.fillStyle = "#94a3b8";
           ctx.font = "700 13px system-ui, sans-serif";
           ctx.fillText(`${arrivalStop.country} · ${arrivalStop.code}`, 296, 470);
 
-          // Hero Featured Landmark Image
           const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
           const activeImg = preloadedImgs.get(activePhotoUrl);
           if (activeImg) {
@@ -542,13 +757,11 @@ export function PreviewModal({
             drawRoundedRect(ctx, 296, 495, 488, 250, 16, "#0a2238");
           }
 
-          // Photo Tag Overlay on Hero Image
           drawRoundedRect(ctx, 642, 510, 126, 32, 12, "rgba(3, 16, 29, 0.92)", "rgba(255, 255, 255, 0.35)", 1);
           ctx.fillStyle = "#ffffff";
           ctx.font = "700 12px system-ui, sans-serif";
           ctx.fillText(`📸 Photo ${photoIdx + 1} of ${Math.max(1, arrivalImages.length)}`, 654, 520);
 
-          // 3 Thumbnail Previews Below
           if (arrivalImages.length > 1) {
             for (let i = 0; i < 3; i++) {
               const tUrl = arrivalImages[i] || "";
@@ -566,7 +779,6 @@ export function PreviewModal({
             }
           }
 
-          // Bottom Continuing Notice
           ctx.fillStyle = "#94a3b8";
           ctx.font = "600 13px system-ui, sans-serif";
           ctx.fillText(
@@ -579,49 +791,72 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 5. Bottom Cinematic Movie Bar
-        ctx.save();
-        ctx.textAlign = "center";
-        ctx.textBaseline = "alphabetic";
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "700 30px Georgia, serif";
-        ctx.shadowColor = "rgba(0,0,0,0.9)";
-        ctx.shadowBlur = 16;
-        ctx.fillText(
-          `${locations[0].name} → ${locations[locations.length - 1].name} · ${totalTripDistance} total`,
-          540,
-          995
-        );
+        // 5. Bottom Cinematic Movie Bar (during journey)
+        if (elapsed >= journeyStartTime && elapsed < summaryStartTime) {
+          ctx.save();
+          ctx.textAlign = "center";
+          ctx.textBaseline = "alphabetic";
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "700 30px Georgia, serif";
+          ctx.shadowColor = "rgba(0,0,0,0.9)";
+          ctx.shadowBlur = 16;
+          ctx.fillText(
+            `${locations[0].name} → ${locations[locations.length - 1].name} · ${totalTripDistance} total`,
+            540,
+            995
+          );
 
-        ctx.fillStyle = "#38bdf8";
-        ctx.font = "700 15px system-ui, sans-serif";
-        ctx.fillText(
-          `${formatTime(curSec)} / ${formatTime(duration)} · 1080p HD 60FPS STORY`,
-          540,
-          1028
-        );
-        ctx.shadowBlur = 0;
+          ctx.fillStyle = "#38bdf8";
+          ctx.font = "700 15px system-ui, sans-serif";
+          ctx.fillText(
+            `${formatTime(curSec)} / ${formatTime(duration)} · 1080p HD 60FPS STORY`,
+            540,
+            1028
+          );
+          ctx.shadowBlur = 0;
 
-        // Bottom Progress Bar
-        ctx.fillStyle = "rgba(255,255,255,0.2)";
-        ctx.fillRect(60, 1052, 960, 4);
-        ctx.fillStyle = "#38bdf8";
-        ctx.fillRect(60, 1052, 960 * currentP, 4);
-        ctx.restore();
+          // Bottom Progress Bar
+          ctx.fillStyle = "rgba(255,255,255,0.2)";
+          ctx.fillRect(60, 1052, 960, 4);
+          ctx.fillStyle = "#38bdf8";
+          ctx.fillRect(60, 1052, 960 * currentP, 4);
+          ctx.restore();
+        }
 
-        const isOpening = elapsed < BRAND_CARD_DURATION_MS;
-        const isClosing = elapsed >= length - BRAND_CARD_DURATION_MS;
-        if (isOpening || isClosing) {
-          const phaseElapsed = isOpening ? elapsed : elapsed - (length - BRAND_CARD_DURATION_MS);
-          const opacity = Math.min(1, Math.max(0, phaseElapsed / 260));
+        // 6. Smooth Intro Card (Fade In & Fade Out)
+        if (elapsed < INTRO_DURATION_MS) {
+          const introFade = getFadeOpacity(elapsed, INTRO_DURATION_MS);
           drawBrandingCard(
             ctx,
             preloadedImgs.get(BRAND_LOGO_URL),
-            isOpening ? "Your journey starts here" : "Journey complete",
-            isOpening
-              ? `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`
-              : "Thanks for travelling with us",
-            opacity
+            "Your journey starts here",
+            `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
+            introFade
+          );
+        }
+
+        // 7. Travel Summary Card Before Outro (Fade In & Fade Out)
+        if (elapsed >= summaryStartTime && elapsed < outroStartTime) {
+          const sumFade = getFadeOpacity(elapsed - summaryStartTime, SUMMARY_DURATION_MS);
+          drawTravelSummaryCard(
+            ctx,
+            locations,
+            legs,
+            totalTripDistance,
+            preloadedImgs,
+            sumFade
+          );
+        }
+
+        // 8. Smooth Outro Card (Fade In & Fade Out)
+        if (elapsed >= outroStartTime) {
+          const outroFade = getFadeOpacity(elapsed - outroStartTime, OUTRO_DURATION_MS);
+          drawBrandingCard(
+            ctx,
+            preloadedImgs.get(BRAND_LOGO_URL),
+            "Journey complete",
+            "Thanks for travelling with us",
+            outroFade
           );
         }
 
@@ -710,7 +945,7 @@ export function PreviewModal({
               color: "#ffffff",
               fontSize: "12px",
               fontWeight: 800,
-              zIndex: 100,
+              zIndex: 110,
               boxShadow: "0 0 20px rgba(239, 68, 68, 0.6)",
               letterSpacing: "0.05em",
             }}
@@ -739,17 +974,108 @@ export function PreviewModal({
           className="map-video-globe"
         />
 
-        {previewBranding && (
-          <div className="video-branding-card" aria-live="polite">
+        {/* Intro Branding Card with Smooth Fade In & Fade Out */}
+        {isIntro && (
+          <div
+            className="video-branding-card"
+            style={{ opacity: introOpacity, transition: "opacity 0.05s linear" }}
+            aria-live="polite"
+          >
             <div className="video-branding-content">
               <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
               <span>ROAMLY STUDIO</span>
-              <strong>{previewBranding.title}</strong>
-              <small>{previewBranding.subtitle}</small>
+              <strong>Your journey starts here</strong>
+              <small>{`${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`}</small>
             </div>
           </div>
         )}
 
+        {/* Travel Summary Card (Before Outro) with Smooth Fade In & Fade Out */}
+        {isSummary && (
+          <div
+            className="video-summary-card"
+            style={{ opacity: summaryOpacity, transition: "opacity 0.05s linear" }}
+            aria-live="polite"
+          >
+            <div className="video-summary-content">
+              <div className="video-summary-header">
+                <span className="summary-pill">✨ TRAVEL SUMMARY</span>
+                <h2>
+                  {locations[0]?.name} → {locations[locations.length - 1]?.name}
+                </h2>
+                <p>Complete trip recap & itinerary statistics</p>
+              </div>
+
+              <div className="summary-stats-grid">
+                <div className="summary-stat-box">
+                  <span className="stat-label">🌍 TOTAL DISTANCE</span>
+                  <strong className="stat-value">{totalTripDistance}</strong>
+                </div>
+                <div className="summary-stat-box">
+                  <span className="stat-label">📍 DESTINATIONS</span>
+                  <strong className="stat-value">{locations.length} Cities</strong>
+                </div>
+                <div className="summary-stat-box">
+                  <span className="stat-label">🗺️ ROUTE LEGS</span>
+                  <strong className="stat-value">{Math.max(1, locations.length - 1)} Legs</strong>
+                </div>
+                <div className="summary-stat-box">
+                  <span className="stat-label">🚀 TRANSPORTS</span>
+                  <strong className="stat-value">
+                    {Array.from(new Set(legs)).map((l) => vehicleMarks[l] || "✈️").join(" ") || "✈️"}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="summary-stops-list">
+                <div className="stops-list-title">📍 ITINERARY STOPS & CONNECTING LEGS</div>
+                <div className="stops-scrollable">
+                  {locations.map((loc, idx) => (
+                    <div key={loc.id || idx} className="summary-stop-item">
+                      <div className={`stop-index-circle ${idx === locations.length - 1 ? "final" : idx === 0 ? "start" : ""}`}>
+                        {idx + 1}
+                      </div>
+                      {loc.imageUrl && (
+                        <img src={loc.imageUrl} alt={loc.name} className="summary-stop-thumb" />
+                      )}
+                      <div className="summary-stop-info">
+                        <strong>{loc.name}</strong>
+                        <small>{loc.country} · {loc.code}</small>
+                      </div>
+                      {idx < locations.length - 1 ? (
+                        <div className="summary-leg-badge">
+                          <span>{vehicleMarks[legs[idx] || "flight"]} Next: {(legs[idx] || "flight").toUpperCase()}</span>
+                        </div>
+                      ) : (
+                        <div className="summary-leg-badge final-badge">
+                          <span>🏁 Final Stop</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Outro Branding Card with Smooth Fade In & Fade Out */}
+        {isOutro && (
+          <div
+            className="video-branding-card"
+            style={{ opacity: outroOpacity, transition: "opacity 0.05s linear" }}
+            aria-live="polite"
+          >
+            <div className="video-branding-content">
+              <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
+              <span>ROAMLY STUDIO</span>
+              <strong>Journey complete</strong>
+              <small>Thanks for travelling with us</small>
+            </div>
+          </div>
+        )}
+
+        {/* Video Player Bottom Controls */}
         <div className="video-controls">
           <div className="video-progress" aria-label="Video progress">
             <i style={{ width: `${internalProgress}%` }} />
@@ -766,15 +1092,21 @@ export function PreviewModal({
               <RotateCcw />
             </button>
             <button
-              aria-label={muted ? "Unmute vehicle sound" : "Mute vehicle sound"}
-              title={muted ? "Unmute vehicle sound" : "Mute vehicle sound"}
+              aria-label={muted ? "Unmute sound" : "Mute sound"}
+              title={muted ? "Unmute sound" : "Mute sound"}
               onClick={() => setMuted((value) => !value)}
               disabled={recording}
             >
               {muted ? <VolumeX /> : <Volume2 />}
             </button>
             <span>
-              {formatTime(elapsedSec)} / {formatTime(duration)} · Stop {currentLegIndex + 1} of {totalLegs} · {destination.name}
+              {isIntro
+                ? "Intro · Roamly Studio"
+                : isSummary
+                ? `Travel Summary · ${totalTripDistance}`
+                : isOutro
+                ? "Outro · Journey Complete"
+                : `${formatTime(elapsedSec)} / ${formatTime(duration)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

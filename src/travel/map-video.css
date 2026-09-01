@@ -25,6 +25,92 @@
   position: absolute;
   inset: 0;
 }
+.arrival-photo-fullscreen {
+  position: absolute;
+  z-index: 70;
+  inset: 0;
+  margin: 0;
+  overflow: hidden;
+  background: #06121d;
+  animation: arrival-photo-in 180ms ease-out;
+}
+.arrival-video-fullscreen {
+  position: absolute;
+  z-index: 70;
+  inset: 0;
+  margin: 0;
+  overflow: hidden;
+  background: #06121d;
+  animation: arrival-photo-in 180ms ease-out;
+}
+.arrival-video-fullscreen video {
+  position: absolute;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  background: #06121d;
+}
+.arrival-video-fullscreen::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(1, 10, 24, 0.08) 34%, rgba(1, 10, 24, 0.9) 100%);
+}
+.arrival-photo-fullscreen img {
+  position: absolute;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.arrival-photo-fullscreen::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: "";
+  background: linear-gradient(180deg, rgba(1, 10, 24, 0.08) 34%, rgba(1, 10, 24, 0.9) 100%);
+}
+.arrival-photo-caption {
+  position: absolute;
+  z-index: 2;
+  right: 7%;
+  bottom: 12%;
+  left: 7%;
+  color: #fff;
+  text-shadow: 0 2px 15px rgba(0, 0, 0, 0.85);
+}
+.arrival-photo-caption span {
+  color: #b9edff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+.arrival-photo-caption h2 {
+  margin: 8px 0;
+  font: 700 clamp(34px, 6vw, 64px)/1.05 Georgia, serif;
+}
+.arrival-photo-caption p {
+  margin: 0;
+  color: #e1f5ff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.video-credit {
+  display: block;
+  margin-top: 10px;
+  color: rgba(225, 245, 255, 0.78);
+  font-size: 10px;
+  font-weight: 600;
+}
+@keyframes arrival-photo-in {
+  from { opacity: 0; transform: scale(1.02); }
+  to { opacity: 1; transform: scale(1); }
+}
 .video-branding-card {
   position: absolute;
   inset: 0;

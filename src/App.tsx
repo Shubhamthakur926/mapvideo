@@ -3,7 +3,7 @@ import { useState } from "react";
 import { JourneyBuilder } from "./travel/JourneyBuilder";
 import { JourneyMap } from "./travel/JourneyMap";
 import { PreviewModal } from "./travel/PreviewModal";
-import type { Location, Transport } from "./travel/types";
+import { getLocationImages, type Location, type Transport } from "./travel/types";
 
 const initialLocations: Location[] = [];
 
@@ -18,12 +18,15 @@ export default function App() {
   const [legs, setLegs] = useState<Transport[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [autoRecord, setAutoRecord] = useState(false);
-  const [customDuration, setCustomDuration] = useState<number | null>(null);
   const [error, setError] = useState("");
 
-  // Medium-speed playback: 20s minimum and about 15s for each route leg.
-  const autoDuration = Math.min(240, Math.max(20, Math.max(1, locations.length - 1) * 15));
-  const duration = customDuration ?? autoDuration;
+  // Every route leg takes 4s, then each destination photo is shown for 2s.
+  // The extra time is the short intro, recap and outro in the generated film.
+  const journeyDuration = locations.slice(1).reduce(
+    (total, location) => total + 4 + Math.max(1, getLocationImages(location).length) * 2,
+    0
+  );
+  const duration = 8.6 + journeyDuration;
   const end = locations.at(-1);
 
   const addLocation = (location: Location) => {
@@ -105,7 +108,6 @@ export default function App() {
     ];
     setLocations(demo);
     setLegs(["flight", "train", "car", "bicycle"]); // ✈️ Flight -> 🚆 Train -> 🚗 Car -> 🚲 Bicycle
-    setCustomDuration(120); // 2 minutes (120 seconds)
     setError("");
   };
 
@@ -192,34 +194,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Video Duration Selector (20s to 4 min) */}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 700 }}>Length:</span>
-            {[
-              { label: "20s", val: 20 },
-              { label: "1 min", val: 60 },
-              { label: "2 min", val: 120 },
-              { label: "3 min", val: 180 },
-              { label: "4 min", val: 240 },
-            ].map((preset) => (
-              <button
-                key={preset.val}
-                type="button"
-                onClick={() => setCustomDuration(preset.val)}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  borderRadius: "14px",
-                  border: duration === preset.val ? "1.5px solid #0284c7" : "1px solid #cbd5e1",
-                  background: duration === preset.val ? "#e0f2fe" : "#ffffff",
-                  color: duration === preset.val ? "#0284c7" : "#475569",
-                  cursor: "pointer",
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
+          <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 700 }}>
+            4s travel per leg · 2s per photo
           </div>
 
           <div className="video-actions">

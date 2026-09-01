@@ -75,7 +75,6 @@ function generateCurvedRoadCoordinates(start: Location, end: Location, segments 
   const dLat = end.lat - start.lat;
   const dist = Math.hypot(dLng, dLat);
 
-  // Perpendicular curvature offset for realistic highway turns
   const perpLng = -dLat * 0.12;
   const perpLat = dLng * 0.12;
   const midLng = (start.lng + end.lng) / 2 + perpLng;
@@ -179,7 +178,6 @@ function findSeaPath(startNodeId: string, endNodeId: string): [number, number][]
     return [[SEA_NODES[startNodeId].lng, SEA_NODES[startNodeId].lat]];
   }
 
-  // BFS Shortest Path Search across Maritime Graph
   const queue: Array<{ id: string; path: string[] }> = [{ id: startNodeId, path: [startNodeId] }];
   const visited = new Set<string>([startNodeId]);
 
@@ -211,7 +209,6 @@ function generateNauticalSeaRoute(start: Location, end: Location, segments = 100
   const seaWaypoints = findSeaPath(startNodeId, endNodeId);
   const fullWaypoints: [number, number][] = [[start.lng, start.lat], ...seaWaypoints, [end.lng, end.lat]];
 
-  // Smooth Catmull-Rom spline interpolation along nautical sea lanes
   const result: [number, number][] = [];
   const totalWaypoints = fullWaypoints.length;
   const totalLegs = totalWaypoints - 1;
@@ -426,29 +423,27 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
   if (transport === "flight") {
     if (dist >= 3000) {
       return {
-        zoom: 3.8 - arc * 1.5, // 3.8 at takeoff/landing -> 2.3 cruising
-        pitch: 38 - arc * 8,    // 38° -> 30°
+        zoom: 3.8 - arc * 1.5,
+        pitch: 38 - arc * 8,
       };
     } else if (dist >= 1000) {
       return {
-        zoom: 4.6 - arc * 1.1, // 4.6 -> 3.5
-        pitch: 40 - arc * 6,   // 40° -> 34°
+        zoom: 4.6 - arc * 1.1,
+        pitch: 40 - arc * 6,
       };
     } else if (dist >= 300) {
       return {
-        zoom: 5.6 - arc * 0.8, // 5.6 -> 4.8
-        pitch: 42 - arc * 5,   // 42° -> 37°
+        zoom: 5.6 - arc * 0.8,
+        pitch: 42 - arc * 5,
       };
     } else {
-      // Short domestic flight hop
       return {
-        zoom: 6.8 - arc * 0.6, // 6.8 -> 6.2
+        zoom: 6.8 - arc * 0.6,
         pitch: 44 - arc * 4,
       };
     }
   }
 
-  // Overland / Surface Transports (Bike, Car, Taxi, Train, Bus, Bicycle, Walking, Ship)
   if (dist >= 2500) {
     return { zoom: 3.5, pitch: 35 };
   } else if (dist >= 1200) {
@@ -458,13 +453,10 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
   } else if (dist >= 150) {
     return { zoom: 6.5, pitch: 44 };
   } else if (dist >= 50) {
-    // Inter-city / state highway travel (50km - 150km)
     return { zoom: 8.0, pitch: 48 };
   } else if (dist >= 15) {
-    // City / suburban travel (15km - 50km)
     return { zoom: 9.8, pitch: 50 };
   } else {
-    // Close / intra-city / street-level travel (< 15km)
     return { zoom: 11.8, pitch: 52 };
   }
 }
@@ -496,7 +488,6 @@ export function MapboxGlobe({
     [locations]
   );
 
-  // Coordinates for all legs (Roads, Sea-lanes, or Flight Arcs)
   const [legRoutes, setLegRoutes] = useState<[number, number][][]>(() => {
     const initial: [number, number][][] = [];
     for (let i = 0; i < locations.length - 1; i++) {
@@ -506,7 +497,6 @@ export function MapboxGlobe({
     return initial;
   });
 
-  // Fetch real road turn-by-turn geometry & sea-lanes
   useEffect(() => {
     let active = true;
     const fetchAllRoutes = async () => {
@@ -525,7 +515,6 @@ export function MapboxGlobe({
     };
   }, [locations, legs]);
 
-  // Active leg & destination stop computation along real roads / sea / sky
   const {
     currentPoint,
     currentMark,
@@ -540,6 +529,7 @@ export function MapboxGlobe({
     arrivalStop,
     activePhotoIndex,
     arrivalImages,
+    pathFraction,
   } = useMemo(() => {
     if (locations.length < 2) {
       return {
@@ -548,6 +538,7 @@ export function MapboxGlobe({
         currentStop: locations[0],
         activeLegIndex: 0,
         legFraction: 0,
+        pathFraction: 0,
         bearing: 0,
         transport: "flight" as Transport,
         currentStart: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
@@ -570,8 +561,6 @@ export function MapboxGlobe({
 
     const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
 
-    // 55% of the leg time is traveling along the route all the way to destination pin,
-    // 45% is dedicated to the slow, relaxed arrival photo showcase once arrived at the city!
     const TRAVEL_SPLIT = 0.55;
     const arrivalActive = fraction >= TRAVEL_SPLIT;
     const pathFraction = arrivalActive ? 1.0 : Math.min(1.0, fraction / TRAVEL_SPLIT);
@@ -579,7 +568,6 @@ export function MapboxGlobe({
     const { pt: point, bearing: calculatedBearing } = getPointAlongPolyline(coords, pathFraction);
     const activeDisplayStop = fraction < 0.35 ? start : end;
 
-    // Active arrival photo index (cycles smoothly across available photos during arrival showcase)
     const arrivalShowcaseFraction = arrivalActive ? (fraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT) : 0;
     const destImages = arrivalActive ? getLocationImages(end) : [];
     const totalImgCount = Math.max(1, destImages.length);
@@ -591,6 +579,7 @@ export function MapboxGlobe({
       currentStop: activeDisplayStop,
       activeLegIndex: legIdx,
       legFraction: fraction,
+      pathFraction,
       bearing: calculatedBearing,
       transport: curTransport,
       currentStart: start,
@@ -602,7 +591,6 @@ export function MapboxGlobe({
     };
   }, [totalLegs, currentProgress, legs, locations, legRoutes]);
 
-  // Initialize Mapbox 3D Globe
   useEffect(() => {
     if (!mapContainerRef.current || !MAPBOX_TOKEN) return;
 
@@ -630,7 +618,6 @@ export function MapboxGlobe({
       setMapLoaded(true);
       map.resize();
 
-      // Atmospheric space background
       map.setFog({
         color: "rgb(186, 210, 240)",
         "high-color": "rgb(36, 92, 223)",
@@ -639,25 +626,12 @@ export function MapboxGlobe({
         "star-intensity": 0.6,
       });
 
-      // Add full route geojson source & layers
-      const fullRouteFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-      for (let i = 0; i < locations.length - 1; i++) {
-        fullRouteFeatures.push({
-          type: "Feature",
-          properties: { leg: i },
-          geometry: {
-            type: "LineString",
-            coordinates: generateArcCoordinates(locations[i], locations[i + 1]),
-          },
-        });
-      }
-
       if (!map.getSource("journey-route-base")) {
         map.addSource("journey-route-base", {
           type: "geojson",
           data: {
             type: "FeatureCollection",
-            features: fullRouteFeatures,
+            features: [],
           },
         });
 
@@ -668,9 +642,9 @@ export function MapboxGlobe({
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             "line-color": "#0284c7",
-            "line-width": 7,
-            "line-opacity": 0.45,
-            "line-blur": 3,
+            "line-width": 8,
+            "line-opacity": 0.6,
+            "line-blur": 4,
           },
         });
 
@@ -681,58 +655,19 @@ export function MapboxGlobe({
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             "line-color": "#38bdf8",
-            "line-width": 2.5,
-            "line-opacity": 0.55,
-            "line-dasharray": [2, 2],
-          },
-        });
-      }
-
-      // Active completed trail layer
-      if (!map.getSource("journey-route-active")) {
-        map.addSource("journey-route-active", {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: [],
-          },
-        });
-
-        map.addLayer({
-          id: "journey-route-active-glow",
-          type: "line",
-          source: "journey-route-active",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: {
-            "line-color": "#38bdf8",
-            "line-width": 8,
-            "line-opacity": 0.7,
-            "line-blur": 4,
-          },
-        });
-
-        map.addLayer({
-          id: "journey-route-active-core",
-          type: "line",
-          source: "journey-route-active",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: {
-            "line-color": "#ffffff",
             "line-width": 3.5,
-            "line-opacity": 1,
+            "line-opacity": 0.9,
           },
         });
       }
     });
 
-    // Remove any previous vehicle marker
     if (vehicleMarkerRef.current) {
       vehicleMarkerRef.current.remove();
       vehicleMarkerRef.current = null;
       vehicleIconRef.current = null;
     }
 
-    // Create Single Vehicle Marker with glowing badge
     const vehicleEl = document.createElement("div");
     vehicleEl.className = "mapbox-vehicle-marker";
     vehicleEl.style.cssText = `
@@ -761,7 +696,6 @@ export function MapboxGlobe({
 
     vehicleMarkerRef.current = vehicleMarker;
 
-    // Resize observer to ensure map always fills its parent container
     const resizeObserver = new ResizeObserver(() => {
       map.resize();
     });
@@ -788,18 +722,28 @@ export function MapboxGlobe({
     };
   }, [mapStyle]);
 
-  // Update Route GeoJSON when locations or real road routes change
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
     const baseSource = map.getSource("journey-route-base") as mapboxgl.GeoJSONSource | undefined;
-    if (baseSource) {
-      const fullRouteFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-      for (let i = 0; i < locations.length - 1; i++) {
-        const coords = legRoutes[i] || getLegCoordinates(locations[i], locations[i + 1], legs[i] ?? "flight");
+    if (!baseSource) return;
 
-        fullRouteFeatures.push({
+    if (locations.length < 2) {
+      baseSource.setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+      return;
+    }
+
+    const traveledFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+
+    // 1. Add all fully completed prior legs
+    for (let i = 0; i < activeLegIndex; i++) {
+      const coords = legRoutes[i] || getLegCoordinates(locations[i], locations[i + 1], legs[i] ?? "flight");
+      if (coords.length >= 2) {
+        traveledFeatures.push({
           type: "Feature",
           properties: { leg: i },
           geometry: {
@@ -808,74 +752,39 @@ export function MapboxGlobe({
           },
         });
       }
-      baseSource.setData({
-        type: "FeatureCollection",
-        features: fullRouteFeatures,
-      });
-    }
-  }, [locations, mapLoaded, legRoutes, legs]);
-
-  // Update Active Route Path GeoJSON as vehicle travels along real roads / sea / sky
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded || locations.length < 2) return;
-
-    const activeSource = map.getSource("journey-route-active") as mapboxgl.GeoJSONSource | undefined;
-    if (!activeSource) return;
-
-    const activeFeatures: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-
-    // Full coordinates for all completed past legs
-    for (let i = 0; i < activeLegIndex; i++) {
-      const pastCoords = legRoutes[i] || getLegCoordinates(locations[i], locations[i + 1], legs[i] ?? "flight");
-
-      activeFeatures.push({
-        type: "Feature",
-        properties: { leg: i },
-        geometry: {
-          type: "LineString",
-          coordinates: pastCoords,
-        },
-      });
     }
 
-    // Partial road/sea/sky coordinates for the current active leg up to vehicle position
-    if (locations[activeLegIndex] && locations[activeLegIndex + 1]) {
-      const curCoords =
+    // 2. Add current active leg up to vehicle's current position (only previous path traveled)
+    if (activeLegIndex < locations.length - 1) {
+      const activeCoords =
         legRoutes[activeLegIndex] ||
-        getLegCoordinates(
-          locations[activeLegIndex],
-          locations[activeLegIndex + 1],
-          legs[activeLegIndex] ?? "flight"
-        );
+        getLegCoordinates(locations[activeLegIndex], locations[activeLegIndex + 1], legs[activeLegIndex] ?? "flight");
 
-      const TRAVEL_SPLIT = 0.65;
-      const pathProgress = isArrival ? 1.0 : Math.min(1, legFraction / TRAVEL_SPLIT);
-      const partialCoords = isArrival ? curCoords : getPolylineUpTo(curCoords, pathProgress);
-      if (partialCoords.length > 1) {
-        activeFeatures.push({
-          type: "Feature",
-          properties: { leg: activeLegIndex },
-          geometry: {
-            type: "LineString",
-            coordinates: partialCoords,
-          },
-        });
+      if (pathFraction > 0.001) {
+        const partialCoords = getPolylineUpTo(activeCoords, pathFraction);
+        if (partialCoords.length >= 2) {
+          traveledFeatures.push({
+            type: "Feature",
+            properties: { leg: activeLegIndex },
+            geometry: {
+              type: "LineString",
+              coordinates: partialCoords,
+            },
+          });
+        }
       }
     }
 
-    activeSource.setData({
+    baseSource.setData({
       type: "FeatureCollection",
-      features: activeFeatures,
+      features: traveledFeatures,
     });
-  }, [activeLegIndex, legFraction, isArrival, locations, mapLoaded, legRoutes, legs]);
+  }, [locations, mapLoaded, legRoutes, legs, activeLegIndex, pathFraction]);
 
-  // Initialize and update Clean Waypoint Pin Markers on the Map
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Clear old markers
     stopMarkersRef.current.forEach((item) => item.marker.remove());
     stopMarkersRef.current = [];
 
@@ -891,7 +800,6 @@ export function MapboxGlobe({
         z-index: 15;
       `;
 
-      // Glassmorphic Destination Card Badge
       const card = document.createElement("div");
       card.className = "mapbox-destination-card";
       card.style.cssText = `
@@ -909,7 +817,6 @@ export function MapboxGlobe({
         white-space: nowrap;
       `;
 
-      // Thumbnail Image or Number Badge
       if (loc.imageUrl) {
         const img = document.createElement("img");
         img.src = loc.imageUrl;
@@ -944,7 +851,6 @@ export function MapboxGlobe({
         card.appendChild(numBadge);
       }
 
-      // Destination Name & Info Label
       const labelDiv = document.createElement("div");
       labelDiv.style.cssText = `
         display: flex;
@@ -982,7 +888,6 @@ export function MapboxGlobe({
       card.appendChild(labelDiv);
       wrapper.appendChild(card);
 
-      // Pin needle
       const needle = document.createElement("div");
       needle.style.cssText = `
         width: 2px;
@@ -992,7 +897,6 @@ export function MapboxGlobe({
       `;
       wrapper.appendChild(needle);
 
-      // Anchor dot
       const pinDot = document.createElement("div");
       pinDot.style.cssText = `
         width: 8px;
@@ -1005,7 +909,6 @@ export function MapboxGlobe({
       `;
       wrapper.appendChild(pinDot);
 
-      // Hover interaction
       wrapper.onmouseenter = () => {
         card.style.transform = "scale(1.08)";
         card.style.borderColor = "#38bdf8";
@@ -1034,7 +937,6 @@ export function MapboxGlobe({
     });
   }, [locations, onSelectDestination]);
 
-  // Update active state styling for destination cards
   useEffect(() => {
     stopMarkersRef.current.forEach((item) => {
       const isTarget = currentStop && currentStop.id === item.id;
@@ -1054,7 +956,6 @@ export function MapboxGlobe({
     });
   }, [currentStop]);
 
-  // Update Vehicle Marker & Cinematic 3D Camera Follow
   useEffect(() => {
     const map = mapRef.current;
     const vMarker = vehicleMarkerRef.current;
@@ -1090,7 +991,6 @@ export function MapboxGlobe({
 
     if (!currentPoint) return;
 
-    // Update vehicle position and emoji
     if (vMarker) {
       vMarker.setLngLat([currentPoint.lng, currentPoint.lat]);
       vMarker.getElement().style.display = showVehicle ? "flex" : "none";
@@ -1099,7 +999,6 @@ export function MapboxGlobe({
       vehicleIconRef.current.textContent = currentMark;
     }
 
-    // Dynamic Cinematic Camera Tracking (Smooth Altitude Arc & Optimal Ground Framing)
     if (isArrival && currentEnd) {
       if (playing) {
         map.easeTo({
@@ -1124,7 +1023,7 @@ export function MapboxGlobe({
           center: [currentPoint.lng, currentPoint.lat],
           zoom: targetZoom,
           pitch: targetPitch,
-          bearing: 0, // Lock North-up so map is always right-side up
+          bearing: 0,
           duration: 120,
           easing: (t) => t,
         });
@@ -1132,11 +1031,10 @@ export function MapboxGlobe({
     }
   }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations, showVehicle]);
 
-  // Internal animation loop only if external progress is not provided
   useEffect(() => {
     if (!playing || externalProgress !== undefined) return;
     let frame = 0;
-    const duration = 20 * 1000; // Medium-speed story
+    const duration = 20 * 1000;
     const started = performance.now();
     const animate = (now: number) => {
       setInternalProgress(((now - started) % duration) / duration);
@@ -1159,7 +1057,6 @@ export function MapboxGlobe({
         background: "#030e18",
       }}
     >
-      {/* Mapbox Canvas Container */}
       <div
         ref={mapContainerRef}
         style={{
@@ -1193,7 +1090,6 @@ export function MapboxGlobe({
         </div>
       )}
 
-      {/* Map Style Selector */}
       {!hideOverlays && (
         <div
           style={{
@@ -1259,7 +1155,6 @@ export function MapboxGlobe({
         </div>
       )}
 
-      {/* Single Active Destination Card (Top of Video) */}
       {!hideOverlays && currentStop && locations.length > 0 && (
         <div
           style={{
@@ -1337,7 +1232,6 @@ export function MapboxGlobe({
         </div>
       )}
 
-      {/* Cinematic Arrival Photo Showcase (Shows 2-3 Pictures upon Reaching Each Stop) */}
       {!hideOverlays && isArrival && arrivalStop && (
         <div
           style={{
@@ -1358,7 +1252,6 @@ export function MapboxGlobe({
             animation: "fadeIn 0.3s ease-out",
           }}
         >
-          {/* Top Arrival Header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span
@@ -1409,7 +1302,6 @@ export function MapboxGlobe({
             {arrivalStop.name}
           </div>
 
-          {/* Large Hero Featured Photo with Transition */}
           <div
             style={{
               position: "relative",
@@ -1432,7 +1324,6 @@ export function MapboxGlobe({
                 display: "block",
               }}
             />
-            {/* Photo Index Tag */}
             <div
               style={{
                 position: "absolute",
@@ -1473,7 +1364,6 @@ export function MapboxGlobe({
             )}
           </div>
 
-          {/* 3 Photos Thumbnail Selector & Indicator Bar */}
           {arrivalImages.length > 1 && (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               {arrivalImages.slice(0, 3).map((imgUrl, idx) => (
@@ -1511,7 +1401,6 @@ export function MapboxGlobe({
             </div>
           )}
 
-          {/* Continuing indicator */}
           <div
             style={{
               display: "flex",

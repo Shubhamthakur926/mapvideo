@@ -9,13 +9,62 @@ export type Location = {
   lng: number;
   imageUrl?: string;
   images?: string[];
+  videoUrl?: string;
+  videoDuration?: number;
   description?: string;
 };
+
+export function getLocationVideo(place?: Location | null): { url: string; duration: number; credit?: string } | null {
+  if (!place) return null;
+
+  // =========================================================================
+  // PUBLIC VIDEO CODE (COMMENTED OUT)
+  // To enable videos from the /public/videos folder or custom videoUrl:
+  // 1. Add your video files (e.g., .mp4, .webm) into `public/videos/`
+  // 2. Uncomment the block below so that destinations match and play video
+  // =========================================================================
+  /*
+  if (place.videoUrl) return { url: place.videoUrl, duration: place.videoDuration ?? 6 };
+
+  const id = place.id.toLowerCase();
+  if (id.includes("goa")) {
+    return {
+      url: "/videos/goa.webm",
+      duration: 6,
+      credit: "Goa beach hyperlapse · Subhashish Panigrahi · CC BY-SA 3.0",
+    };
+  }
+  if (id.includes("manali")) {
+    return {
+      url: "/videos/manali.webm",
+      duration: 6,
+      credit: "Cycling on the Manali–Leh Highway · Yann Forget · CC BY 3.0",
+    };
+  }
+  if (id.includes("london")) {
+    return {
+      url: "/videos/london.webm",
+      duration: 6,
+      credit: "Trafalgar Square Bubbles · Dmitry Dzhus · CC BY 2.0",
+    };
+  }
+  */
+
+  return null;
+}
 
 export function getLocationImages(place?: Location | null): string[] {
   if (!place) return [];
   if (place.images && place.images.length > 0) return place.images;
   if (!place.imageUrl) return [];
+
+  // Optional traveller-focused gallery. Normal journeys use photos for the selected destination below.
+  const tripMoments = [
+    "https://images.unsplash.com/photo-1527631746610-bca00a040d60?w=1600&auto=format&fit=crop&q=88",
+    "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1600&auto=format&fit=crop&q=88",
+    "https://images.unsplash.com/photo-1470770841072-f978cf4d019e?w=1600&auto=format&fit=crop&q=88",
+  ];
+  if (place.description?.includes("[traveller]")) return tripMoments;
 
   const id = place.id.toLowerCase();
   const name = place.name.toLowerCase();

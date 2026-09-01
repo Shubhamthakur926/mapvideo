@@ -16,6 +16,7 @@ type Props = {
   className?: string;
   onSelectDestination?: (location: Location) => void;
   hideOverlays?: boolean;
+  showVehicle?: boolean;
 };
 
 const vehicleMarks: Record<Transport, string> = {
@@ -477,6 +478,7 @@ export function MapboxGlobe({
   className = "",
   onSelectDestination,
   hideOverlays = false,
+  showVehicle = true,
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -568,18 +570,20 @@ export function MapboxGlobe({
 
     const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
 
-    // 65% of the leg time is traveling along the route, 35% is arrival photo showcase
-    const TRAVEL_SPLIT = 0.65;
+    // 55% of the leg time is traveling along the route all the way to destination pin,
+    // 45% is dedicated to the slow, relaxed arrival photo showcase once arrived at the city!
+    const TRAVEL_SPLIT = 0.55;
     const arrivalActive = fraction >= TRAVEL_SPLIT;
-    const pathFraction = arrivalActive ? 1.0 : Math.min(1, fraction / TRAVEL_SPLIT);
+    const pathFraction = arrivalActive ? 1.0 : Math.min(1.0, fraction / TRAVEL_SPLIT);
 
     const { pt: point, bearing: calculatedBearing } = getPointAlongPolyline(coords, pathFraction);
-    const activeDisplayStop = fraction < 0.25 ? start : end;
+    const activeDisplayStop = fraction < 0.35 ? start : end;
 
-    // Active arrival photo index (cycles 0 -> 1 -> 2 during arrival showcase)
+    // Active arrival photo index (cycles smoothly across available photos during arrival showcase)
     const arrivalShowcaseFraction = arrivalActive ? (fraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT) : 0;
-    const photoIdx = Math.min(2, Math.floor(arrivalShowcaseFraction * 3));
     const destImages = arrivalActive ? getLocationImages(end) : [];
+    const totalImgCount = Math.max(1, destImages.length);
+    const photoIdx = Math.min(totalImgCount - 1, Math.floor(arrivalShowcaseFraction * totalImgCount));
 
     return {
       currentPoint: arrivalActive ? { lat: end.lat, lng: end.lng } : point,
@@ -1070,7 +1074,7 @@ export function MapboxGlobe({
     if (locations.length === 1) {
       if (vMarker) {
         vMarker.setLngLat([locations[0].lng, locations[0].lat]);
-        vMarker.getElement().style.display = "flex";
+        vMarker.getElement().style.display = showVehicle ? "flex" : "none";
       }
       if (vehicleIconRef.current) {
         vehicleIconRef.current.textContent = "📍";
@@ -1089,7 +1093,7 @@ export function MapboxGlobe({
     // Update vehicle position and emoji
     if (vMarker) {
       vMarker.setLngLat([currentPoint.lng, currentPoint.lat]);
-      vMarker.getElement().style.display = "flex";
+      vMarker.getElement().style.display = showVehicle ? "flex" : "none";
     }
     if (vehicleIconRef.current) {
       vehicleIconRef.current.textContent = currentMark;
@@ -1111,7 +1115,7 @@ export function MapboxGlobe({
       const { zoom: targetZoom, pitch: targetPitch } = getCinematicCamera(
         currentStart,
         currentEnd,
-        Math.min(1, legFraction / 0.65),
+        Math.min(1, legFraction / 0.55),
         transport
       );
 
@@ -1126,7 +1130,7 @@ export function MapboxGlobe({
         });
       }
     }
-  }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations]);
+  }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations, showVehicle]);
 
   // Internal animation loop only if external progress is not provided
   useEffect(() => {

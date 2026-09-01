@@ -14,8 +14,20 @@ export type Location = {
   description?: string;
 };
 
-export function getLocationVideo(place?: Location | null): { url: string; duration: number; credit?: string } | null {
+export function getLocationVideo(place?: Location | null): { url: string; duration?: number; credit?: string } | null {
   if (!place) return null;
+
+  // Video metadata is read by the player so clips are never shortened or sped up.
+  if (place.videoUrl) return { url: place.videoUrl, duration: place.videoDuration };
+
+  const videoId = place.id.toLowerCase();
+  const videoName = place.name.toLowerCase();
+  if (videoId.includes("mumbai") || videoName.includes("mumbai")) {
+    return { url: "/videos/mumbai.mp4", credit: "Destination – Mumbai – India · Incredible India · CC BY 3.0" };
+  }
+  if (videoId.includes("goa") || videoName.includes("goa")) {
+    return { url: "/videos/goa.webm", credit: "Goa beach hyperlapse · Subhashish Panigrahi · CC BY-SA 3.0" };
+  }
 
   // =========================================================================
   // PUBLIC VIDEO CODE (COMMENTED OUT)

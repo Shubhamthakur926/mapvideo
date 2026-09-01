@@ -32,7 +32,7 @@
   margin: 0;
   overflow: hidden;
   background: #06121d;
-  animation: arrival-photo-in 180ms ease-out;
+  will-change: opacity;
 }
 .arrival-video-fullscreen {
   position: absolute;
@@ -41,7 +41,7 @@
   margin: 0;
   overflow: hidden;
   background: #06121d;
-  animation: arrival-photo-in 180ms ease-out;
+  will-change: opacity;
 }
 .arrival-video-fullscreen video {
   position: absolute;
@@ -106,10 +106,6 @@
   color: rgba(225, 245, 255, 0.78);
   font-size: 10px;
   font-weight: 600;
-}
-@keyframes arrival-photo-in {
-  from { opacity: 0; transform: scale(1.02); }
-  to { opacity: 1; transform: scale(1); }
 }
 .video-branding-card {
   position: absolute;

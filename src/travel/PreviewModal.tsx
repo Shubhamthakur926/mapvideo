@@ -28,15 +28,16 @@ const OUTRO_DURATION_MS = 2500;
 const FADE_TRANSITION_MS = 500;
 const VEHICLE_LEG_DURATION_MS = 4000;
 const PHOTO_DURATION_MS = 2000;
+const EXPORT_FRAME_RATE = 30;
 
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
-function getVehicleAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
+function getAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
   let buffer = audioBufferCache.get(url);
   if (!buffer) {
     buffer = fetch(url)
       .then((response) => {
-        if (!response.ok) throw new Error(`Unable to load vehicle sound: ${url}`);
+        if (!response.ok) throw new Error(`Unable to load audio: ${url}`);
         return response.arrayBuffer();
       })
       .then((data) => context.decodeAudioData(data));
@@ -230,17 +231,17 @@ function drawTravelSummaryCard(
   // Stops list container - DYNAMIC height based on number of locations
   const stopsListY = 338;
   const maxStopsListH = 645;
-  
+
   // Calculate how many stops can fit with adaptive row height
   const headerHeight = 45;
   const minRowHeight = 52;
   const maxRowHeight = 84;
-  
+
   // Calculate optimal row height based on number of locations
   const availableHeight = maxStopsListH - headerHeight - 10;
   const calculatedRowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableHeight / locations.length));
   const totalStopsHeight = Math.min(maxStopsListH, headerHeight + 10 + (locations.length * calculatedRowH));
-  
+
   drawRoundedRect(ctx, 90, stopsListY, 900, totalStopsHeight, 22, "#f8fafc", "#e2e8f0", 1.5);
 
   ctx.textAlign = "left";
@@ -287,12 +288,12 @@ function drawTravelSummaryCard(
     const textStartX = img ? 178 + thumbSize + 10 : 180;
     const nameFontSize = locations.length > 12 ? 12 : locations.length > 8 ? 14 : 17;
     const countryFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 10 : 12;
-    
+
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#0f172a";
     ctx.font = `700 ${nameFontSize}px system-ui, sans-serif`;
-    
+
     // Truncate long names to prevent overflow
     const maxNameWidth = locations.length > 12 ? 120 : 200;
     let displayName = loc.name;
@@ -313,7 +314,7 @@ function drawTravelSummaryCard(
     const badgeHeight = locations.length > 12 ? 20 : locations.length > 8 ? 24 : 28;
     const badgeFontSize = locations.length > 12 ? 8 : locations.length > 8 ? 9 : 11;
     const badgeX = 950 - badgeWidth - 20;
-    
+
     if (i < locations.length - 1) {
       const legTransport = legs[i] || "flight";
       const tEmoji = vehicleMarks[legTransport] || "✈️";
@@ -376,7 +377,7 @@ async function preloadVideos(urls: string[]): Promise<Map<string, HTMLVideoEleme
           video.preload = "auto";
           video.muted = true;
           video.playsInline = true;
-          video.onloadeddata = () => {
+          video.oncanplay = () => {
             videos.set(url, video);
             resolve();
           };
@@ -417,10 +418,37 @@ export function PreviewModal({
   const [restartKey, setRestartKey] = useState(0);
   const [recording, setRecording] = useState(false);
   const [recordProgress, setRecordProgress] = useState(0);
-  // Video must begin muted: browsers block delayed autoplay with sound. The
-  // viewer can turn on the original clip audio with the sound control.
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [unavailableVideos, setUnavailableVideos] = useState<string[]>([]);
+  const [clipDurations, setClipDurations] = useState<Record<string, number>>({});
+
+  // Use each file's intrinsic duration. A fixed duration would either cut the
+  // clip short or make it play at the wrong speed.
+  useEffect(() => {
+    const clips = locations
+      .map(getLocationVideo)
+      .filter((clip): clip is { url: string; duration?: number; credit?: string } => clip !== null);
+    const cleanups = clips.map((clip) => {
+      const media = document.createElement("video");
+      media.preload = "metadata";
+      media.src = clip.url;
+      const updateDuration = () => {
+        if (Number.isFinite(media.duration) && media.duration > 0) {
+          setClipDurations((current) =>
+            current[clip.url] === media.duration ? current : { ...current, [clip.url]: media.duration }
+          );
+        }
+      };
+      media.addEventListener("loadedmetadata", updateDuration);
+      media.load();
+      return () => {
+        media.removeEventListener("loadedmetadata", updateDuration);
+        media.removeAttribute("src");
+        media.load();
+      };
+    });
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [locations]);
 
   const totalLegs = Math.max(1, locations.length - 1);
   const legSchedule = useMemo(
@@ -437,10 +465,12 @@ export function PreviewModal({
           photoCount,
           // A destination clip replaces the still-photo section. This makes the
           // travel footage visible as soon as the vehicle arrives.
-          duration: VEHICLE_LEG_DURATION_MS + (video ? video.duration * 1000 : photoCount * PHOTO_DURATION_MS),
+          duration:
+            VEHICLE_LEG_DURATION_MS +
+            (video ? (clipDurations[video.url] ?? video.duration ?? 6) * 1000 : photoCount * PHOTO_DURATION_MS),
         };
       }),
-    [locations]
+    [locations, clipDurations]
   );
   const totalJourneyDuration = legSchedule.reduce((total, leg) => total + leg.duration, 0);
   const totalPlaybackDuration = INTRO_DURATION_MS + totalJourneyDuration + SUMMARY_DURATION_MS + OUTRO_DURATION_MS;
@@ -484,6 +514,10 @@ export function PreviewModal({
   const isVideoScheduled = isPhotoShowcase && Boolean(activeSchedule?.video);
   const isVideoShowcase = isVideoScheduled && !unavailableVideos.includes(activeSchedule?.video?.url ?? "");
   const isMediaShowcase = isPhotoShowcase || isVideoScheduled;
+  const arrivalMediaDuration = Math.max(0, (activeSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
+  const arrivalMediaOpacity = isPhotoShowcase
+    ? getFadeOpacity(elapsedInLeg - VEHICLE_LEG_DURATION_MS, arrivalMediaDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
+    : 0;
   const travelProgress = Math.min(1, elapsedInLeg / VEHICLE_LEG_DURATION_MS);
   const photoIndex = isPhotoShowcase
     ? Math.min(activeSchedule?.photoCount! - 1, Math.floor((elapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS))
@@ -657,24 +691,68 @@ export function PreviewModal({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
-    const canvasStream = canvas.captureStream(60);
+    // A 30fps composition is smooth for the travel movement and lets the
+    // browser encode every frame reliably (instead of dropping 1080p frames).
+    const canvasStream = canvas.captureStream(EXPORT_FRAME_RATE);
     const audioContext = new AudioContext();
     const audioDestination = audioContext.createMediaStreamDestination();
-    const audioStartTime = audioContext.currentTime + 0.08;
+    let audioStartTime = 0;
     await audioContext.resume();
 
-    try {
-      const buffer = await getVehicleAudioBuffer(audioContext, BACKGROUND_MUSIC_URL);
+    // Mix the export on one Web Audio timeline. Background music occupies only
+    // the gaps; the original destination soundtrack owns the full clip window.
+    const videoWindows = legSchedule.reduce<{ start: number; end: number; url: string }[]>(
+      (windows, schedule, index) => {
+        if (!schedule.video) return windows;
+        const legStart = INTRO_DURATION_MS + legSchedule.slice(0, index).reduce((sum, leg) => sum + leg.duration, 0);
+        windows.push({ start: legStart + VEHICLE_LEG_DURATION_MS, end: legStart + schedule.duration, url: schedule.video.url });
+        return windows;
+      },
+      []
+    );
+    const connectLoop = (buffer: AudioBuffer, startMs: number, endMs: number, volume: number) => {
+      if (endMs <= startMs) return;
       const source = audioContext.createBufferSource();
       const gain = audioContext.createGain();
       source.buffer = buffer;
       source.loop = true;
-      gain.gain.value = BACKGROUND_MUSIC_VOLUME;
+      gain.gain.value = volume;
       source.connect(gain).connect(audioDestination);
-      source.start(audioStartTime + INTRO_DURATION_MS / 1000);
-      source.stop(audioStartTime + (totalPlaybackDuration) / 1000);
-    } catch (error) {
-      console.warn("Unable to prepare background music for export.", error);
+      source.start(audioStartTime + startMs / 1000);
+      source.stop(audioStartTime + endMs / 1000);
+    };
+
+    // Decoding is completed before the common clock is selected. Without this,
+    // a large video can make its audio start late in the exported file.
+    const audioBuffers = new Map<string, AudioBuffer>();
+    await Promise.all(
+      [BACKGROUND_MUSIC_URL, ...videoWindows.map((window) => window.url)].map(async (url) => {
+        try {
+          audioBuffers.set(url, await getAudioBuffer(audioContext, url));
+        } catch (error) {
+          console.warn(`Unable to prepare audio for ${url}.`, error);
+        }
+      })
+    );
+    audioStartTime = audioContext.currentTime + 0.08;
+
+    const music = audioBuffers.get(BACKGROUND_MUSIC_URL);
+    if (music) {
+      let cursor = INTRO_DURATION_MS;
+      for (const window of videoWindows) {
+        connectLoop(music, cursor, window.start, BACKGROUND_MUSIC_VOLUME);
+        cursor = window.end;
+      }
+      connectLoop(music, cursor, totalPlaybackDuration, BACKGROUND_MUSIC_VOLUME);
+    }
+    for (const window of videoWindows) {
+      const clipAudio = audioBuffers.get(window.url);
+      if (!clipAudio) continue;
+      const source = audioContext.createBufferSource();
+      source.buffer = clipAudio;
+      source.connect(audioDestination);
+      source.start(audioStartTime + window.start / 1000);
+      source.stop(audioStartTime + window.end / 1000);
     }
 
     const mime =
@@ -687,7 +765,7 @@ export function PreviewModal({
     ]);
     const recorder = new MediaRecorder(combinedStream, {
       mimeType: mime,
-      videoBitsPerSecond: 12000000,
+      videoBitsPerSecond: 14000000,
     });
     const chunks: BlobPart[] = [];
 
@@ -702,10 +780,18 @@ export function PreviewModal({
     // 3. Record Intro, Journey, Travel Summary, and Outro
     const length = totalPlaybackDuration;
     const started = performance.now();
+    const frameInterval = 1000 / EXPORT_FRAME_RATE;
+    let lastRenderedAt = started - frameInterval;
 
     await new Promise<void>((resolve) => {
       const anim = (now: number) => {
         const elapsed = now - started;
+
+        if (elapsed < length && now - lastRenderedAt < frameInterval) {
+          requestAnimationFrame(anim);
+          return;
+        }
+        lastRenderedAt = now;
 
         // Drive player state frame-by-frame
         setTimelineElapsed(Math.min(elapsed, length));
@@ -734,21 +820,26 @@ export function PreviewModal({
         const recVideoStart = VEHICLE_LEG_DURATION_MS;
         const recVideo =
           recElapsedInLeg >= recVideoStart && recSchedule?.video ? recSchedule.video : null;
+        const recArrivalDuration = Math.max(0, (recSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
+        const recArrivalOpacity = isArrival
+          ? getFadeOpacity(recElapsedInLeg - VEHICLE_LEG_DURATION_MS, recArrivalDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
+          : 0;
         const exportVideo = recVideo ? preloadedVideos.get(recVideo.url) : undefined;
         if (recVideo?.url !== activeExportVideoUrl) {
           if (activeExportVideoUrl) preloadedVideos.get(activeExportVideoUrl)?.pause();
           activeExportVideoUrl = recVideo?.url ?? null;
           if (exportVideo) {
             exportVideo.currentTime = 0;
-            exportVideo.playbackRate = exportVideo.duration > 0 ? exportVideo.duration / (recVideo?.duration ?? 1) : 1;
+            // The schedule uses metadata duration, so rendering at normal speed
+            // keeps every frame of the source clip instead of time-stretching it.
+            exportVideo.playbackRate = 1;
             void exportVideo.play().catch(() => undefined);
           }
         }
         const photoIdx = isArrival
           ? Math.min(totalPhotos - 1, Math.floor((recElapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS))
           : 0;
-        const photoLocalProgress = 0;
-        const curSec = Math.floor(currentP * effectiveDurationSec);
+        const curSec = Math.floor(elapsed / 1000);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
         const activeMap = frame.current?.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapCanvas;
@@ -846,100 +937,71 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 4. Cinematic Arrival Photo Showcase Card (When Vehicle Arrives at Stop)
+        // 4. Full-screen Arrival Media (photo or video) with fade & crossfade transitions
         if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < summaryStartTime) {
-          drawRoundedRect(ctx, 270, 390, 540, 530, 26, "rgba(3, 16, 29, 0.98)", "rgba(56, 189, 248, 0.85)", 3);
-
           ctx.save();
-          ctx.fillStyle = "#38bdf8";
-          ctx.font = "800 14px system-ui, sans-serif";
-          ctx.fillText(`✨ ARRIVED AT DESTINATION · STOP ${legIdx + 2} OF ${totalLegs + 1}`, 296, 412);
+          ctx.globalAlpha = recArrivalOpacity;
 
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "700 28px Georgia, serif";
-          ctx.shadowColor = "rgba(0,0,0,0.9)";
-          ctx.shadowBlur = 8;
-          ctx.fillText(arrivalStop.name, 296, 436);
-          ctx.shadowBlur = 0;
-
-          ctx.fillStyle = "#94a3b8";
-          ctx.font = "700 13px system-ui, sans-serif";
-          ctx.fillText(`${arrivalStop.country} · ${arrivalStop.code}`, 296, 470);
-
-          const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
-          const activeImg = preloadedImgs.get(activePhotoUrl);
-          if (activeImg) {
-            drawRoundedImage(ctx, activeImg, 296, 495, 488, 250, 16);
-          } else {
-            drawRoundedRect(ctx, 296, 495, 488, 250, 16, "#0a2238");
-          }
-
-          // Smooth crossfade dissolve into next photo during the last 25% of each photo's duration
-          if (photoLocalProgress > 0.75 && photoIdx < totalPhotos - 1) {
-            const nextPhotoUrl = arrivalImages[photoIdx + 1] || "";
-            const nextImg = preloadedImgs.get(nextPhotoUrl);
-            if (nextImg) {
-              const crossFadeAlpha = (photoLocalProgress - 0.75) / 0.25;
-              ctx.save();
-              ctx.globalAlpha = crossFadeAlpha;
-              drawRoundedImage(ctx, nextImg, 296, 495, 488, 250, 16);
-              ctx.restore();
-            }
-          }
-
-          drawRoundedRect(ctx, 642, 510, 126, 32, 12, "rgba(3, 16, 29, 0.92)", "rgba(255, 255, 255, 0.35)", 1);
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "700 12px system-ui, sans-serif";
-          ctx.fillText(`📸 Photo ${photoIdx + 1} of ${Math.max(1, arrivalImages.length)}`, 654, 520);
-
-          if (arrivalImages.length > 1) {
-            for (let i = 0; i < Math.min(3, arrivalImages.length); i++) {
-              const tUrl = arrivalImages[i] || "";
-              const tImg = preloadedImgs.get(tUrl);
-              const tx = 296 + i * 166;
-              const ty = 760;
-              if (tImg) {
-                drawRoundedImage(ctx, tImg, tx, ty, 154, 76, 12);
-              }
-              if (i === photoIdx) {
-                drawRoundedRect(ctx, tx, ty, 154, 76, 12, undefined, "#38bdf8", 3);
-              } else {
-                drawRoundedRect(ctx, tx, ty, 154, 76, 12, undefined, "rgba(255, 255, 255, 0.25)", 1.5);
-              }
-            }
-          }
-
-          ctx.fillStyle = "#94a3b8";
-          ctx.font = "600 13px system-ui, sans-serif";
-          ctx.fillText(
-            legIdx + 1 < totalLegs
-              ? `Continuing to ${locations[legIdx + 2]?.name || "next stop"}...`
-              : "Journey route complete!",
-            296,
-            858
-          );
-
-          // Preserve the actual destination clip in the downloaded journey.
           if (recVideo && exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            // Destination video fills the entire frame
             ctx.drawImage(exportVideo, 0, 0, 1080, 1080);
-          } else if (activeImg) {
-            ctx.drawImage(activeImg, 0, 0, 1080, 1080);
+          } else {
+            const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
+            const activeImg = preloadedImgs.get(activePhotoUrl);
+            if (activeImg) {
+              ctx.drawImage(activeImg, 0, 0, 1080, 1080);
+            } else {
+              ctx.fillStyle = "#030e18";
+              ctx.fillRect(0, 0, 1080, 1080);
+            }
+
+            // Smooth crossfade dissolve into the next full-screen photo during
+            // the last 25% of each photo's on-screen duration
+            const photoElapsed = recElapsedInLeg - VEHICLE_LEG_DURATION_MS - photoIdx * PHOTO_DURATION_MS;
+            const photoLocalProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_DURATION_MS));
+            if (photoLocalProgress > 0.75 && photoIdx < totalPhotos - 1) {
+              const nextPhotoUrl = arrivalImages[photoIdx + 1] || "";
+              const nextImg = preloadedImgs.get(nextPhotoUrl);
+              if (nextImg) {
+                const crossFadeAlpha = (photoLocalProgress - 0.75) / 0.25;
+                ctx.save();
+                ctx.globalAlpha = recArrivalOpacity * crossFadeAlpha;
+                ctx.drawImage(nextImg, 0, 0, 1080, 1080);
+                ctx.restore();
+              }
+            }
           }
+
+          // Soft bottom gradient so the caption stays readable over any photo/video
+          const gradient = ctx.createLinearGradient(0, 800, 0, 1080);
+          gradient.addColorStop(0, "rgba(3, 16, 29, 0)");
+          gradient.addColorStop(1, "rgba(3, 16, 29, 0.88)");
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 800, 1080, 280);
+
           ctx.textAlign = "left";
           ctx.textBaseline = "alphabetic";
+          ctx.fillStyle = "#38bdf8";
+          ctx.font = "800 15px system-ui, sans-serif";
+          ctx.fillText(`✨ ARRIVED · STOP ${legIdx + 2} OF ${totalLegs + 1}`, 60, 905);
+
           ctx.fillStyle = "#ffffff";
-          ctx.font = "700 48px Georgia, serif";
-          ctx.shadowColor = "rgba(0, 0, 0, 0.88)";
+          ctx.font = "700 46px Georgia, serif";
+          ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
           ctx.shadowBlur = 14;
-          ctx.fillText(arrivalStop.name, 60, 920);
-          ctx.fillStyle = "#d9f4ff";
-          ctx.font = "700 21px system-ui, sans-serif";
-          ctx.fillText(
-            recVideo ? `${arrivalStop.country} · Travel video` : `${arrivalStop.country} · Photo ${photoIdx + 1} of ${totalPhotos} · 2 seconds`,
-            60,
-            960
-          );
+          ctx.fillText(arrivalStop.name, 60, 962);
           ctx.shadowBlur = 0;
+
+          ctx.fillStyle = "#d9f4ff";
+          ctx.font = "700 19px system-ui, sans-serif";
+          ctx.fillText(
+            recVideo
+              ? `${arrivalStop.country} · Travel video`
+              : `${arrivalStop.country} · Photo ${photoIdx + 1} of ${totalPhotos}`,
+            60,
+            996
+          );
+
           ctx.restore();
         }
 
@@ -961,7 +1023,7 @@ export function PreviewModal({
           ctx.fillStyle = "#38bdf8";
           ctx.font = "700 15px system-ui, sans-serif";
           ctx.fillText(
-            `${formatTime(curSec)} / ${formatTime(duration)} · 1080p HD 60FPS STORY`,
+            `${formatTime(curSec)} / ${formatTime(effectiveDurationSec)} · 1080p HD ${EXPORT_FRAME_RATE}FPS STORY`,
             540,
             1028
           );
@@ -1129,7 +1191,11 @@ export function PreviewModal({
         />
 
         {isJourney && isPhotoShowcase && !isVideoShowcase && (
-          <section className="arrival-photo-fullscreen" aria-label={`${destination.name} travel photo`}>
+          <section
+            className="arrival-photo-fullscreen"
+            style={{ opacity: arrivalMediaOpacity }}
+            aria-label={`${destination.name} travel photo`}
+          >
             {activePhotoUrl ? <img src={activePhotoUrl} alt={`${destination.name} travel moment`} /> : null}
             <div className="arrival-photo-caption">
               <span>ARRIVED · STOP {currentLegIndex + 2} OF {totalLegs + 1}</span>
@@ -1142,7 +1208,11 @@ export function PreviewModal({
         )}
 
         {isJourney && isVideoShowcase && activeSchedule?.video && (
-          <section className="arrival-video-fullscreen" aria-label={`${destination.name} travel video`}>
+          <section
+            className="arrival-video-fullscreen"
+            style={{ opacity: arrivalMediaOpacity }}
+            aria-label={`${destination.name} travel video`}
+          >
             <video
               ref={videoRef}
               key={activeSchedule.video.url}
@@ -1297,7 +1367,7 @@ export function PreviewModal({
                 ? `Travel Summary · ${totalTripDistance}`
                 : isOutro
                 ? "Outro · Journey Complete"
-                : `${formatTime(elapsedSec)} / ${formatTime(duration)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
+                : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

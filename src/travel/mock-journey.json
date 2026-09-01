@@ -1,0 +1,49 @@
+{
+  "locations": [
+    {
+      "name": "Delhi",
+      "country": "India",
+      "code": "DEL",
+      "lat": 28.6139,
+      "lng": 77.209,
+      "images": [
+        "https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },{
+      "name": "Mumbai",
+      "country": "India",
+      "code": "BOM",
+      "lat": 19.076,
+      "lng": 72.8777,
+      "transport": "flight",
+      "videoUrl": "public/videos/mumbai.mp4",
+      "images": [
+        "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1566552881560-0be862a7c445?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Jaipur",
+      "country": "India",
+      "code": "JAI",
+      "lat": 26.9124,
+      "lng": 75.7873,
+      "transport": "car",
+      "images": [
+        "https://images.unsplash.com/photo-1599661046289-e31897846e41?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Goa",
+      "country": "India",
+      "code": "GOI",
+      "lat": 15.2993,
+      "lng": 74.124,
+      "transport": "train",
+      "images": [
+        "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&auto=format&fit=crop&q=85"
+      ]
+    }
+  ]
+}

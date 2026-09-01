@@ -20,10 +20,14 @@ export function getLocationVideo(place?: Location | null): { url: string; durati
   // Video metadata is read by the player so clips are never shortened or sped up.
   if (place.videoUrl) return { url: place.videoUrl, duration: place.videoDuration };
 
+  // JSON itineraries can supply their own arrival gallery.  Do not replace it
+  // with a built-in city video merely because a stop happens to be named Mumbai/Goa.
+  if (place.images && place.images.length > 0) return null;
+
   const videoId = place.id.toLowerCase();
   const videoName = place.name.toLowerCase();
   if (videoId.includes("mumbai") || videoName.includes("mumbai")) {
-    return { url: "/videos/mumbai.mp4", credit: "Destination – Mumbai – India · Incredible India · CC BY 3.0" };
+    return { url: "https://samplelib.com/lib/preview/mp4/sample-10s.mp4", credit: "Mumbai video sample · public MP4" };
   }
   if (videoId.includes("goa") || videoName.includes("goa")) {
     return { url: "/videos/goa.webm", credit: "Goa beach hyperlapse · Subhashish Panigrahi · CC BY-SA 3.0" };

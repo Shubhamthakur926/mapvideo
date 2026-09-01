@@ -3,8 +3,27 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getLocationImages, type Location, type Transport } from "./types";
 
 export const MAPBOX_TOKEN =
-  (import.meta as { env?: { VITE_MAPBOX_TOKEN?: string } }).env?.VITE_MAPBOX_TOKEN ||
-  (typeof process !== "undefined" && process.env ? process.env.REACT_APP_MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN : "") ||
+  (import.meta as {
+    env?: {
+      VITE_MAPBOX_TOKEN?: string;
+      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
+      REACT_APP_MAPBOX_TOKEN?: string;
+    };
+  }).env?.VITE_MAPBOX_TOKEN ||
+  (import.meta as {
+    env?: {
+      VITE_MAPBOX_TOKEN?: string;
+      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
+      REACT_APP_MAPBOX_TOKEN?: string;
+    };
+  }).env?.NEXT_PUBLIC_MAPBOX_TOKEN ||
+  (import.meta as {
+    env?: {
+      VITE_MAPBOX_TOKEN?: string;
+      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
+      REACT_APP_MAPBOX_TOKEN?: string;
+    };
+  }).env?.REACT_APP_MAPBOX_TOKEN ||
   "";
 
 type Props = {
@@ -30,6 +49,16 @@ const vehicleMarks: Record<Transport, string> = {
   walking: "🚶",
   ship: "🚢",
 };
+
+// Fade envelope helper: ramps 0 -> 1 over the first `fadeIn` fraction of the
+// arrival showcase, then holds at 1 for the remainder. Used to smoothly fade
+// the full-screen arrival photo in as soon as the vehicle reaches a stop.
+function getArrivalFadeOpacity(fraction: number, fadeIn = 0.12): number {
+  if (fraction <= 0) return 0;
+  if (fraction >= 1) return 1;
+  if (fraction < fadeIn) return fraction / fadeIn;
+  return 1;
+}
 
 function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
@@ -529,6 +558,7 @@ export function MapboxGlobe({
     arrivalStop,
     activePhotoIndex,
     arrivalImages,
+    arrivalShowcaseFraction,
     pathFraction,
   } = useMemo(() => {
     if (locations.length < 2) {
@@ -547,6 +577,7 @@ export function MapboxGlobe({
         arrivalStop: null,
         activePhotoIndex: 0,
         arrivalImages: [],
+        arrivalShowcaseFraction: 0,
       };
     }
 
@@ -588,6 +619,7 @@ export function MapboxGlobe({
       arrivalStop: arrivalActive ? end : null,
       activePhotoIndex: photoIdx,
       arrivalImages: destImages,
+      arrivalShowcaseFraction,
     };
   }, [totalLegs, currentProgress, legs, locations, legRoutes]);
 
@@ -1044,6 +1076,8 @@ export function MapboxGlobe({
     return () => cancelAnimationFrame(frame);
   }, [totalLegs, externalProgress, playing]);
 
+  const arrivalFadeOpacity = getArrivalFadeOpacity(arrivalShowcaseFraction);
+
   return (
     <div
       className={`mapbox-globe-wrapper ${className}`}
@@ -1155,7 +1189,7 @@ export function MapboxGlobe({
         </div>
       )}
 
-      {!hideOverlays && currentStop && locations.length > 0 && (
+      {!hideOverlays && currentStop && locations.length > 0 && !isArrival && (
         <div
           style={{
             position: "absolute",
@@ -1202,8 +1236,6 @@ export function MapboxGlobe({
             >
               {locations.length < 2
                 ? "📍 Selected Destination"
-                : isArrival
-                ? `🎉 Arrived (Stop ${activeLegIndex + 2} of ${totalLegs + 1})`
                 : legFraction < 0.25
                 ? `📍 Departing (Stop ${activeLegIndex + 1} of ${totalLegs + 1})`
                 : `🎯 En Route (Stop ${activeLegIndex + 2} of ${totalLegs + 1})`}
@@ -1232,191 +1264,88 @@ export function MapboxGlobe({
         </div>
       )}
 
+      {/* Full-screen arrival photo showcase with fade-in and crossfade transitions
+          (replaces the old floating summary card entirely — no box, no grid,
+          no thumbnails: the photo itself fills the frame). */}
       {!hideOverlays && isArrival && arrivalStop && (
         <div
           style={{
             position: "absolute",
-            bottom: "22px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: "min(460px, calc(100% - 32px))",
-            borderRadius: "22px",
-            background: "rgba(3, 16, 29, 0.95)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            border: "1.5px solid rgba(56, 189, 248, 0.7)",
-            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.85), 0 0 25px rgba(56, 189, 248, 0.4)",
-            padding: "14px 16px",
+            inset: 0,
             zIndex: 40,
-            color: "#ffffff",
-            animation: "fadeIn 0.3s ease-out",
+            overflow: "hidden",
+            opacity: arrivalFadeOpacity,
+            pointerEvents: "none",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  fontSize: "10px",
-                  fontWeight: 800,
-                  color: "#38bdf8",
-                  background: "rgba(56, 189, 248, 0.15)",
-                  border: "1px solid rgba(56, 189, 248, 0.4)",
-                  padding: "3px 8px",
-                  borderRadius: "20px",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                <span
-                  style={{
-                    width: "6px",
-                    height: "6px",
-                    borderRadius: "50%",
-                    background: "#38bdf8",
-                    display: "inline-block",
-                    boxShadow: "0 0 8px #38bdf8",
-                  }}
-                />
-                Arrived · Stop {activeLegIndex + 2} of {totalLegs + 1}
-              </span>
-              <span style={{ fontSize: "11px", color: "#94a3b8" }}>{arrivalStop.country}</span>
-            </div>
-            <span
-              style={{
-                fontSize: "10px",
-                fontWeight: 800,
-                background: "#0284c7",
-                color: "#ffffff",
-                padding: "2px 7px",
-                borderRadius: "8px",
-              }}
-            >
-              {arrivalStop.code}
-            </span>
-          </div>
-
-          <div style={{ fontSize: "18px", fontWeight: 700, fontFamily: "Georgia, serif", marginBottom: "10px" }}>
-            {arrivalStop.name}
-          </div>
-
-          <div
-            style={{
-              position: "relative",
-              width: "100%",
-              height: "175px",
-              borderRadius: "14px",
-              overflow: "hidden",
-              marginBottom: "10px",
-              border: "1.5px solid rgba(255, 255, 255, 0.2)",
-            }}
-          >
-            <img
-              src={arrivalImages[activePhotoIndex] || arrivalStop.imageUrl}
-              alt={`${arrivalStop.name} photo ${activePhotoIndex + 1}`}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transition: "opacity 0.4s ease-in-out",
-                display: "block",
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                top: "10px",
-                right: "10px",
-                background: "rgba(3, 16, 29, 0.85)",
-                backdropFilter: "blur(8px)",
-                border: "1px solid rgba(255, 255, 255, 0.3)",
-                color: "#ffffff",
-                fontSize: "11px",
-                fontWeight: 700,
-                padding: "3px 8px",
-                borderRadius: "12px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-              }}
-            >
-              📸 Photo {activePhotoIndex + 1} of {Math.max(1, arrivalImages.length)}
-            </div>
-
-            {arrivalStop.description && (
-              <div
+          {arrivalImages.length > 0 ? (
+            arrivalImages.map((imgUrl, idx) => (
+              <img
+                key={imgUrl + idx}
+                src={imgUrl}
+                alt={`${arrivalStop.name} photo ${idx + 1}`}
                 style={{
                   position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  padding: "8px 12px",
-                  background: "linear-gradient(to top, rgba(3, 16, 29, 0.92) 0%, rgba(3, 16, 29, 0) 100%)",
-                  fontSize: "12px",
-                  color: "#e2e8f0",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  opacity: idx === activePhotoIndex ? 1 : 0,
+                  transition: "opacity 0.9s ease-in-out",
                 }}
-              >
-                {arrivalStop.description}
-              </div>
-            )}
-          </div>
+              />
+            ))
+          ) : arrivalStop.imageUrl ? (
+            <img
+              src={arrivalStop.imageUrl}
+              alt={arrivalStop.name}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : null}
 
-          {arrivalImages.length > 1 && (
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              {arrivalImages.slice(0, 3).map((imgUrl, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    flex: 1,
-                    position: "relative",
-                    height: "44px",
-                    borderRadius: "8px",
-                    overflow: "hidden",
-                    border: idx === activePhotoIndex ? "2px solid #38bdf8" : "1.5px solid rgba(255, 255, 255, 0.2)",
-                    boxShadow: idx === activePhotoIndex ? "0 0 12px rgba(56, 189, 248, 0.8)" : "none",
-                    transform: idx === activePhotoIndex ? "scale(1.03)" : "scale(1.0)",
-                    transition: "all 0.25s ease",
-                    opacity: idx === activePhotoIndex ? 1 : 0.65,
-                  }}
-                >
-                  <img src={imgUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  {idx === activePhotoIndex && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: 0,
-                        left: 0,
-                        height: "3px",
-                        width: "100%",
-                        background: "#38bdf8",
-                        boxShadow: "0 0 6px #38bdf8",
-                      }}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
+          {/* Soft bottom gradient so the caption stays readable over any photo */}
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginTop: "8px",
-              fontSize: "11px",
-              color: "#94a3b8",
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: "56px 32px 28px",
+              background: "linear-gradient(to top, rgba(3, 16, 29, 0.92) 0%, rgba(3, 16, 29, 0) 100%)",
             }}
           >
-            <span>
-              {activeLegIndex + 1 < totalLegs
-                ? `Continuing to ${locations[activeLegIndex + 2]?.name || "next stop"}...`
-                : "Journey route complete!"}
-            </span>
-            <span style={{ color: "#38bdf8", fontWeight: 600 }}>3D Tour Active</span>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                fontSize: "11px",
+                fontWeight: 800,
+                color: "#38bdf8",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                marginBottom: "8px",
+              }}
+            >
+              <span
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  background: "#38bdf8",
+                  display: "inline-block",
+                  boxShadow: "0 0 8px #38bdf8",
+                }}
+              />
+              Arrived · Stop {activeLegIndex + 2} of {totalLegs + 1}
+            </div>
+            <div style={{ fontSize: "30px", fontWeight: 700, fontFamily: "Georgia, serif", color: "#ffffff" }}>
+              {arrivalStop.name}
+            </div>
+            <div style={{ fontSize: "13px", color: "#cbd5e1", marginTop: "4px" }}>
+              {arrivalStop.country} · {arrivalStop.code}
+              {arrivalImages.length > 0 && ` · Photo ${activePhotoIndex + 1} of ${arrivalImages.length}`}
+            </div>
           </div>
         </div>
       )}

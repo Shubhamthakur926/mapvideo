@@ -457,17 +457,17 @@ export function PreviewModal({
         const images = getLocationImages(stop);
         const video = getLocationVideo(stop);
         const photoCount = Math.max(1, images.length);
+        const videoDurationMs = video ? (clipDurations[video.url] ?? video.duration ?? 5) * 1000 : 0;
+        const photosDurationMs = photoCount * PHOTO_DURATION_MS;
         return {
           index,
           stop,
           images,
           video,
           photoCount,
-          // A destination clip replaces the still-photo section. This makes the
-          // travel footage visible as soon as the vehicle arrives.
-          duration:
-            VEHICLE_LEG_DURATION_MS +
-            (video ? (clipDurations[video.url] ?? video.duration ?? 6) * 1000 : photoCount * PHOTO_DURATION_MS),
+          videoDurationMs,
+          photosDurationMs,
+          duration: VEHICLE_LEG_DURATION_MS + videoDurationMs + photosDurationMs,
         };
       }),
     [locations, clipDurations]
@@ -510,17 +510,27 @@ export function PreviewModal({
   }
   const currentLegIndex = activeSchedule?.index ?? 0;
   const destination = activeSchedule?.stop ?? locations.at(-1)!;
-  const isPhotoShowcase = elapsedInLeg >= VEHICLE_LEG_DURATION_MS;
-  const isVideoScheduled = isPhotoShowcase && Boolean(activeSchedule?.video);
-  const isVideoShowcase = isVideoScheduled && !unavailableVideos.includes(activeSchedule?.video?.url ?? "");
-  const isMediaShowcase = isPhotoShowcase || isVideoScheduled;
+  const isArrivalPhase = elapsedInLeg >= VEHICLE_LEG_DURATION_MS;
+  const videoDurationMs = activeSchedule?.video
+    ? (clipDurations[activeSchedule.video.url] ?? activeSchedule.video.duration ?? 6) * 1000
+    : 0;
+  const isVideoShowcase =
+    isArrivalPhase &&
+    Boolean(activeSchedule?.video) &&
+    !unavailableVideos.includes(activeSchedule?.video?.url ?? "") &&
+    elapsedInLeg - VEHICLE_LEG_DURATION_MS < videoDurationMs;
+  const showDestinationPhoto = isArrivalPhase && Boolean(destination?.imageUrl || activeSchedule?.images.length);
+  const isMediaShowcase = isArrivalPhase;
   const arrivalMediaDuration = Math.max(0, (activeSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
-  const arrivalMediaOpacity = isPhotoShowcase
+  const arrivalMediaOpacity = isArrivalPhase
     ? getFadeOpacity(elapsedInLeg - VEHICLE_LEG_DURATION_MS, arrivalMediaDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
     : 0;
   const travelProgress = Math.min(1, elapsedInLeg / VEHICLE_LEG_DURATION_MS);
-  const photoIndex = isPhotoShowcase
-    ? Math.min(activeSchedule?.photoCount! - 1, Math.floor((elapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS))
+  const photoIndex = isArrivalPhase
+    ? Math.min(
+        Math.max(0, (activeSchedule?.photoCount ?? 1) - 1),
+        Math.floor(Math.max(0, elapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS)
+      )
     : 0;
   const activePhotoUrl = activeSchedule?.images[photoIndex] || destination?.imageUrl || "";
   // Mapbox uses equal-width leg progress. Keep it on the current route while photos are shown.
@@ -818,8 +828,12 @@ export function PreviewModal({
         const arrivalImages = recSchedule?.images || getLocationImages(arrivalStop);
         const totalPhotos = Math.max(1, recSchedule?.photoCount ?? arrivalImages.length);
         const recVideoStart = VEHICLE_LEG_DURATION_MS;
-        const recVideo =
-          recElapsedInLeg >= recVideoStart && recSchedule?.video ? recSchedule.video : null;
+        const recVideoDurationMs = recSchedule?.videoDurationMs ?? 0;
+        const recArrivalElapsed = Math.max(0, recElapsedInLeg - VEHICLE_LEG_DURATION_MS);
+        const isRecVideoActive = isArrival && recVideoDurationMs > 0 && recArrivalElapsed < recVideoDurationMs;
+        const recVideo = isRecVideoActive && recSchedule?.video ? recSchedule.video : null;
+        const isRecPhotoPhase = isArrival && (!recSchedule?.video || recArrivalElapsed >= recVideoDurationMs);
+        const recPhotoElapsed = isRecPhotoPhase ? Math.max(0, recArrivalElapsed - recVideoDurationMs) : 0;
         const recArrivalDuration = Math.max(0, (recSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
         const recArrivalOpacity = isArrival
           ? getFadeOpacity(recElapsedInLeg - VEHICLE_LEG_DURATION_MS, recArrivalDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
@@ -830,15 +844,14 @@ export function PreviewModal({
           activeExportVideoUrl = recVideo?.url ?? null;
           if (exportVideo) {
             exportVideo.currentTime = 0;
-            // The schedule uses metadata duration, so rendering at normal speed
-            // keeps every frame of the source clip instead of time-stretching it.
             exportVideo.playbackRate = 1;
             void exportVideo.play().catch(() => undefined);
           }
         }
-        const photoIdx = isArrival
-          ? Math.min(totalPhotos - 1, Math.floor((recElapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS))
+        const photoIdx = isRecPhotoPhase
+          ? Math.min(totalPhotos - 1, Math.floor(recPhotoElapsed / PHOTO_DURATION_MS))
           : 0;
+        const photoElapsed = isRecPhotoPhase ? recPhotoElapsed - photoIdx * PHOTO_DURATION_MS : 0;
         const curSec = Math.floor(elapsed / 1000);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
@@ -957,7 +970,6 @@ export function PreviewModal({
 
             // Smooth crossfade dissolve into the next full-screen photo during
             // the last 25% of each photo's on-screen duration
-            const photoElapsed = recElapsedInLeg - VEHICLE_LEG_DURATION_MS - photoIdx * PHOTO_DURATION_MS;
             const photoLocalProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_DURATION_MS));
             if (photoLocalProgress > 0.75 && photoIdx < totalPhotos - 1) {
               const nextPhotoUrl = arrivalImages[photoIdx + 1] || "";
@@ -1190,7 +1202,7 @@ export function PreviewModal({
           showVehicle={!isMediaShowcase}
         />
 
-        {isJourney && isPhotoShowcase && !isVideoShowcase && (
+        {isJourney && showDestinationPhoto && !isVideoShowcase && (
           <section
             className="arrival-photo-fullscreen"
             style={{ opacity: arrivalMediaOpacity }}
@@ -1213,6 +1225,21 @@ export function PreviewModal({
             style={{ opacity: arrivalMediaOpacity }}
             aria-label={`${destination.name} travel video`}
           >
+            {activePhotoUrl ? (
+              <img
+                src={activePhotoUrl}
+                alt={`${destination.name} travel moment`}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  filter: "brightness(0.55) saturate(0.8)",
+                  zIndex: 0,
+                }}
+              />
+            ) : null}
             <video
               ref={videoRef}
               key={activeSchedule.video.url}
@@ -1220,13 +1247,14 @@ export function PreviewModal({
               autoPlay
               playsInline
               muted={muted}
+              style={{ position: "relative", zIndex: 1 }}
               onError={() =>
                 setUnavailableVideos((current) =>
                   current.includes(activeSchedule.video!.url) ? current : [...current, activeSchedule.video!.url]
                 )
               }
             />
-            <div className="arrival-photo-caption">
+            <div className="arrival-photo-caption" style={{ position: "relative", zIndex: 2 }}>
               <span>{muted ? "TRAVEL VIDEO · TAP SOUND FOR ORIGINAL AUDIO" : "TRAVEL VIDEO · ORIGINAL AUDIO"}</span>
               <h2>{destination.name}</h2>
               <p>{destination.country}</p>

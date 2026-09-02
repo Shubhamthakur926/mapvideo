@@ -43,6 +43,33 @@
   background: #06121d;
   will-change: opacity;
 }
+@keyframes popIn {
+  0% { transform: scale(0.35); opacity: 0; }
+  65% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes snappyPop {
+  0% { transform: scale(0.35); opacity: 0; }
+  65% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes arrivalFlash {
+  0% { opacity: 0.35; }
+  100% { opacity: 0; }
+}
+@keyframes microFlash {
+  0% { opacity: 0.35; }
+  100% { opacity: 0; }
+}
+.arrival-flash-overlay,
+.micro-flash-overlay {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  pointer-events: none;
+  z-index: 75;
+  animation: microFlash 100ms ease-out forwards;
+}
 .arrival-video-fullscreen video {
   position: absolute;
   z-index: 0;
@@ -51,6 +78,7 @@
   display: block;
   object-fit: cover;
   background: #06121d;
+  animation: snappyPop 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 .arrival-video-fullscreen::after {
   position: absolute;

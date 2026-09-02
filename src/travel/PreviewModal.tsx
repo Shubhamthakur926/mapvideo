@@ -1,6 +1,8 @@
 import { Download, Expand, Loader2, Pause, Play, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import type { Map as MapboxMap } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calculateDistanceKm, formatDistanceKm, MapboxGlobe } from "./MapboxGlobe";
+import { RouteOverviewMap, type RouteOverviewMapHandle } from "./RouteOverviewMap";
 import { getLocationImages, getLocationVideo, type Location, type Transport } from "./types";
 import "./map-video.css";
 import "./video-controls.css";
@@ -19,6 +21,7 @@ const vehicleMarks: Record<Transport, string> = {
 
 const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
 const BACKGROUND_MUSIC_VOLUME = 0.6;
+const BACKGROUND_MUSIC_DUCK_VOLUME = 0.15;
 const BRAND_LOGO_URL = "/picture/App-logo.png";
 
 // Stage Durations
@@ -28,6 +31,7 @@ const OUTRO_DURATION_MS = 2500;
 const FADE_TRANSITION_MS = 500;
 const VEHICLE_LEG_DURATION_MS = 4000;
 const PHOTO_DURATION_MS = 2000;
+const ROUTE_MAP_DURATION_MS = 3200; // 2D route overview stage, shown right before the summary
 const EXPORT_FRAME_RATE = 30;
 
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
@@ -371,6 +375,127 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
   ctx.restore();
 }
 
+// Full 2D route overview frame for the HD export: the live tiles are
+// captured straight from the flat RouteOverviewMap's own <canvas>
+// (mapboxgl handles all map rendering/alignment itself), and the start/
+// finish flags + name pills are positioned using that same map's own
+// map.project([lng, lat]) pixel coordinates — so they always land exactly
+// on top of the correct spot on the captured tiles, with zero manual
+// coordinate math.
+function drawRouteOverviewFrame(options: {
+  ctx: CanvasRenderingContext2D;
+  routeCanvas: HTMLCanvasElement | null;
+  routeMap: MapboxMap | null;
+  locations: Location[];
+  opacity: number;
+  totalTripDistance: string;
+}) {
+  const { ctx, routeCanvas, routeMap, locations, opacity, totalTripDistance } = options;
+  if (opacity <= 0.001 || locations.length === 0) return;
+
+  try {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+
+    // Full-screen live map tiles, no card/border
+    if (routeCanvas && routeCanvas.width > 0 && routeCanvas.height > 0) {
+      ctx.drawImage(routeCanvas, 0, 0, 1080, 1080);
+    } else {
+      ctx.fillStyle = "#eef6ff";
+      ctx.fillRect(0, 0, 1080, 1080);
+    }
+
+    // Top gradient + header
+    const topGrad = ctx.createLinearGradient(0, 0, 0, 160);
+    topGrad.addColorStop(0, "rgba(0,0,0,0.65)");
+    topGrad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(0, 0, 1080, 160);
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#38bdf8";
+    ctx.font = "800 15px system-ui, sans-serif";
+    ctx.fillText("🗺️ FULL ROUTE OVERVIEW", 540, 40);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 30px Georgia, serif";
+    ctx.fillText(`${locations[0]?.name ?? "Start"} → ${locations.at(-1)?.name ?? "Destination"}`, 540, 78);
+
+    ctx.fillStyle = "#e2e8f0";
+    ctx.font = "600 14px system-ui, sans-serif";
+    ctx.fillText(`Complete 2D route map · ${totalTripDistance} travelled`, 540, 110);
+
+    // Flags + numbered stops via map.project() — no manual coordinate math
+    if (routeMap) {
+      const canvasEl = routeMap.getCanvas();
+      const clientW = canvasEl?.clientWidth || canvasEl?.width || 1;
+      const clientH = canvasEl?.clientHeight || canvasEl?.height || 1;
+      const scaleX = 1080 / clientW;
+      const scaleY = 1080 / clientH;
+
+      locations.forEach((loc, i) => {
+        const isFirst = i === 0;
+        const isLast = i === locations.length - 1;
+        const p = routeMap.project([loc.lng, loc.lat]);
+        if (!p || typeof p.x !== "number" || typeof p.y !== "number" || Number.isNaN(p.x) || Number.isNaN(p.y)) return;
+        const px = p.x * scaleX;
+        const py = p.y * scaleY;
+
+        if (!isFirst && !isLast) {
+          ctx.beginPath();
+          ctx.arc(px, py, 8, 0, Math.PI * 2);
+          ctx.fillStyle = "#64748b";
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = "#ffffff";
+          ctx.stroke();
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "700 10px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(`${i + 1}`, px, py + 0.5);
+          return;
+        }
+
+        ctx.font = "28px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(isFirst ? "🚩" : "🏁", px, py - 14);
+
+        const label = loc.name;
+        ctx.font = "800 13px system-ui, sans-serif";
+        const labelW = ctx.measureText(label).width + 20;
+        const labelY = py + 26;
+        drawRoundedRect(ctx, px - labelW / 2, labelY, labelW, 24, 12, isFirst ? "#0284c7" : "#16a34a");
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, px, labelY + 12);
+      });
+    }
+
+    // Bottom gradient + start/finish
+    const btmGrad = ctx.createLinearGradient(0, 940, 0, 1080);
+    btmGrad.addColorStop(0, "rgba(0,0,0,0)");
+    btmGrad.addColorStop(1, "rgba(0,0,0,0.65)");
+    ctx.fillStyle = btmGrad;
+    ctx.fillRect(0, 940, 1080, 140);
+
+    ctx.font = "700 15px system-ui, sans-serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
+    ctx.fillText(`🚩 Start: ${locations[0]?.name}`, 60, 1005);
+    ctx.textAlign = "right";
+    ctx.fillText(`🏁 Finish: ${locations.at(-1)?.name}`, 1020, 1005);
+
+    ctx.restore();
+  } catch (err) {
+    console.warn("drawRouteOverviewFrame error:", err);
+    ctx.restore();
+  }
+}
+
 // Preload images into memory for smooth video generation
 async function preloadImages(urls: string[]): Promise<Map<string, HTMLImageElement>> {
   const map = new Map<string, HTMLImageElement>();
@@ -445,6 +570,7 @@ export function PreviewModal({
   const frame = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const routeOverviewRef = useRef<RouteOverviewMapHandle>(null);
   const [playing, setPlaying] = useState(true);
   const [timelineElapsed, setTimelineElapsed] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
@@ -505,7 +631,8 @@ export function PreviewModal({
     [locations, clipDurations]
   );
   const totalJourneyDuration = legSchedule.reduce((total, leg) => total + leg.duration, 0);
-  const totalPlaybackDuration = INTRO_DURATION_MS + totalJourneyDuration + SUMMARY_DURATION_MS + OUTRO_DURATION_MS;
+  const totalPlaybackDuration =
+    INTRO_DURATION_MS + totalJourneyDuration + ROUTE_MAP_DURATION_MS + SUMMARY_DURATION_MS + OUTRO_DURATION_MS;
   const effectiveDurationSec = totalPlaybackDuration / 1000;
 
   // Timestamps
@@ -609,7 +736,7 @@ export function PreviewModal({
     }
   }, [playing, recording, timelineElapsed, totalPlaybackDuration]);
 
-  // Background music audio playback during preview
+  // Background music audio playback during preview with smooth ducking
   useEffect(() => {
     if (recording) return;
 
@@ -617,7 +744,9 @@ export function PreviewModal({
     audioRef.current = audio;
     audio.loop = true;
     audio.muted = muted;
-    audio.volume = BACKGROUND_MUSIC_VOLUME;
+
+    const targetVolume = isMediaShowcase ? BACKGROUND_MUSIC_DUCK_VOLUME : BACKGROUND_MUSIC_VOLUME;
+    audio.volume = muted ? 0 : targetVolume;
 
     const musicUrl = new URL(BACKGROUND_MUSIC_URL, window.location.href).href;
     if (audio.src !== musicUrl) {
@@ -626,12 +755,12 @@ export function PreviewModal({
       audio.load();
     }
 
-    if (playing && !isIntro && !isVideoShowcase) {
+    if (playing && !isIntro) {
       playPreviewAudio(audio);
     } else {
       audio.pause();
     }
-  }, [playing, isIntro, isVideoShowcase, muted, recording]);
+  }, [playing, isIntro, isMediaShowcase, muted, recording]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -684,7 +813,7 @@ export function PreviewModal({
 
   const fullscreen = () => frame.current?.requestFullscreen?.().catch(() => undefined);
 
-  // Synchronized HD Video Generator & Downloader with Intro, Journey, Summary & Outro
+  // Synchronized HD Video Generator & Downloader with Intro, Journey, Route Map, Summary & Outro
   const startDownloadRecording = async () => {
     if (locations.length < 2 || recording) return;
 
@@ -738,33 +867,30 @@ export function PreviewModal({
     await audioContext.resume();
 
     // Mix the export on one Web Audio timeline. Background music occupies only
-    // the gaps; the original destination soundtrack owns the full clip window.
-    const videoWindows = legSchedule.reduce<{ start: number; end: number; url: string }[]>(
-      (windows, schedule, index) => {
-        if (!schedule.video) return windows;
-        const legStart = INTRO_DURATION_MS + legSchedule.slice(0, index).reduce((sum, leg) => sum + leg.duration, 0);
-        windows.push({ start: legStart + VEHICLE_LEG_DURATION_MS, end: legStart + schedule.duration, url: schedule.video.url });
-        return windows;
-      },
-      []
+    // Calculate all arrival showcase windows across all legs
+    const arrivalWindows: { start: number; end: number; hasVideo: boolean; videoUrl?: string }[] = [];
+    legSchedule.forEach((schedule, index) => {
+      const legStart = INTRO_DURATION_MS + legSchedule.slice(0, index).reduce((sum, leg) => sum + leg.duration, 0);
+      const arrivalStart = legStart + VEHICLE_LEG_DURATION_MS;
+      const arrivalEnd = legStart + schedule.duration;
+      arrivalWindows.push({
+        start: arrivalStart,
+        end: arrivalEnd,
+        hasVideo: Boolean(schedule.video),
+        videoUrl: schedule.video?.url,
+      });
+    });
+
+    const videoWindows = arrivalWindows.filter(
+      (w): w is { start: number; end: number; hasVideo: boolean; videoUrl: string } =>
+        Boolean(w.hasVideo && w.videoUrl)
     );
-    const connectLoop = (buffer: AudioBuffer, startMs: number, endMs: number, volume: number) => {
-      if (endMs <= startMs) return;
-      const source = audioContext.createBufferSource();
-      const gain = audioContext.createGain();
-      source.buffer = buffer;
-      source.loop = true;
-      gain.gain.value = volume;
-      source.connect(gain).connect(audioDestination);
-      source.start(audioStartTime + startMs / 1000);
-      source.stop(audioStartTime + endMs / 1000);
-    };
 
     // Decoding is completed before the common clock is selected. Without this,
     // a large video can make its audio start late in the exported file.
     const audioBuffers = new Map<string, AudioBuffer>();
     await Promise.all(
-      [BACKGROUND_MUSIC_URL, ...videoWindows.map((window) => window.url)].map(async (url) => {
+      [BACKGROUND_MUSIC_URL, ...videoWindows.map((window) => window.videoUrl)].map(async (url) => {
         try {
           audioBuffers.set(url, await getAudioBuffer(audioContext, url));
         } catch (error) {
@@ -776,15 +902,30 @@ export function PreviewModal({
 
     const music = audioBuffers.get(BACKGROUND_MUSIC_URL);
     if (music) {
-      let cursor = INTRO_DURATION_MS;
-      for (const window of videoWindows) {
-        connectLoop(music, cursor, window.start, BACKGROUND_MUSIC_VOLUME);
-        cursor = window.end;
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      source.buffer = music;
+      source.loop = true;
+      source.connect(gain).connect(audioDestination);
+
+      const musicStart = audioStartTime + INTRO_DURATION_MS / 1000;
+      const musicEnd = audioStartTime + totalPlaybackDuration / 1000;
+      gain.gain.setValueAtTime(BACKGROUND_MUSIC_VOLUME, musicStart);
+      for (const w of arrivalWindows) {
+        const duckAt = audioStartTime + w.start / 1000;
+        const restoreAt = audioStartTime + w.end / 1000;
+        gain.gain.setValueAtTime(BACKGROUND_MUSIC_VOLUME, Math.max(musicStart, duckAt - 0.08));
+        gain.gain.linearRampToValueAtTime(BACKGROUND_MUSIC_DUCK_VOLUME, duckAt);
+        gain.gain.setValueAtTime(BACKGROUND_MUSIC_DUCK_VOLUME, Math.max(duckAt, restoreAt - 0.08));
+        gain.gain.linearRampToValueAtTime(BACKGROUND_MUSIC_VOLUME, restoreAt);
       }
-      connectLoop(music, cursor, totalPlaybackDuration, BACKGROUND_MUSIC_VOLUME);
+      gain.gain.setValueAtTime(BACKGROUND_MUSIC_VOLUME, musicEnd - 0.4);
+      gain.gain.linearRampToValueAtTime(0, musicEnd);
+      source.start(musicStart);
+      source.stop(musicEnd);
     }
     for (const window of videoWindows) {
-      const clipAudio = audioBuffers.get(window.url);
+      const clipAudio = audioBuffers.get(window.videoUrl);
       if (!clipAudio) continue;
       const source = audioContext.createBufferSource();
       source.buffer = clipAudio;
@@ -815,7 +956,7 @@ export function PreviewModal({
 
     recorder.start();
 
-    // 3. Record Intro, Journey, Travel Summary, and Outro
+    // 3. Record Intro, Journey, Route Overview, Travel Summary, and Outro
     const length = totalPlaybackDuration;
     const started = performance.now();
     const frameInterval = 1000 / EXPORT_FRAME_RATE;
@@ -890,7 +1031,7 @@ export function PreviewModal({
         }
 
         // 2. Draw Moving Vehicle Marker & Destination Target Pill (during journey)
-        if (!isArrival && elapsed >= journeyStartTime && elapsed < summaryStartTime) {
+        if (!isArrival && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           ctx.save();
           // Outer halo pulse
           ctx.beginPath();
@@ -942,7 +1083,7 @@ export function PreviewModal({
         }
 
         // 3. Top-Left Active Status Banner (during journey)
-        if (elapsed >= journeyStartTime && elapsed < summaryStartTime) {
+        if (elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           drawRoundedRect(ctx, 40, 40, 460, 110, 22, "rgba(3, 16, 29, 0.95)", "rgba(56, 189, 248, 0.75)", 2);
 
           const bannerImg = preloadedImgs.get(arrivalStop?.imageUrl || "");
@@ -976,38 +1117,69 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 4. Full-screen Arrival Media (photo or video) with fade & crossfade transitions
-        if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < summaryStartTime) {
+        // 4. Full-screen Arrival Media (photo or video) with snappy spring pop entrance
+        if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           ctx.save();
           ctx.globalAlpha = recArrivalOpacity;
 
           if (recVideo && exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            // Destination video fills the entire frame
-            ctx.drawImage(exportVideo, 0, 0, 1080, 1080);
+            // Destination video with snappy spring pop entrance
+            const popMs = 400;
+            const t = Math.min(1, Math.max(0, recArrivalElapsed / popMs));
+            const c1 = 1.35;
+            const c3 = c1 + 1;
+            const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+            const scale = 0.35 + 0.65 * springEased;
+            const dw = 1080 * scale, dh = 1080 * scale;
+            const dx = (1080 - dw) / 2, dy = (1080 - dh) / 2;
+            ctx.drawImage(exportVideo, dx, dy, dw, dh);
           } else {
             const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
             const activeImg = preloadedImgs.get(activePhotoUrl);
+            const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
+
+            // Snappy spring overshoot scaling (0.35 -> 1.04 -> 1.00)
+            const popMs = 400;
+            const t = Math.min(1, Math.max(0, photoElapsed / popMs));
+            const c1 = 1.35;
+            const c3 = c1 + 1;
+            const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+            const scale = 0.35 + 0.65 * springEased;
+
+            const dw = 1080 * scale, dh = 1080 * scale;
+            const dx = (1080 - dw) / 2, dy = (1080 - dh) / 2;
+
+            // Draw previous image underneath during the jump to prevent any black background glitch
+            if (photoIdx > 0 && photoElapsed < popMs) {
+              const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
+              const prevImg = preloadedImgs.get(prevPhotoUrl);
+              if (prevImg) {
+                ctx.drawImage(prevImg, 0, 0, 1080, 1080);
+              }
+            }
+
             if (activeImg) {
-              ctx.drawImage(activeImg, 0, 0, 1080, 1080);
+              if (t < 1) {
+                ctx.save();
+                ctx.shadowColor = "rgba(0,0,0,0.65)";
+                ctx.shadowBlur = 24;
+                ctx.drawImage(activeImg, dx, dy, dw, dh);
+                ctx.restore();
+              } else {
+                ctx.drawImage(activeImg, dx, dy, dw, dh);
+              }
             } else {
               ctx.fillStyle = "#030e18";
               ctx.fillRect(0, 0, 1080, 1080);
             }
 
-            // Smooth crossfade dissolve into the next full-screen photo during
-            // the last 25% of each photo's on-screen duration
-            const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
-            const photoLocalProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_DURATION_MS));
-            if (photoLocalProgress > 0.75 && photoIdx < totalPhotos - 1) {
-              const nextPhotoUrl = arrivalImages[photoIdx + 1] || "";
-              const nextImg = preloadedImgs.get(nextPhotoUrl);
-              if (nextImg) {
-                const crossFadeAlpha = (photoLocalProgress - 0.75) / 0.25;
-                ctx.save();
-                ctx.globalAlpha = recArrivalOpacity * crossFadeAlpha;
-                ctx.drawImage(nextImg, 0, 0, 1080, 1080);
-                ctx.restore();
-              }
+            // Micro shutter flash on each photo jump (first 100ms)
+            if (photoElapsed < 100) {
+              const flashAlpha = (1 - photoElapsed / 100) * 0.35;
+              ctx.save();
+              ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
+              ctx.fillRect(0, 0, 1080, 1080);
+              ctx.restore();
             }
           }
 
@@ -1045,7 +1217,7 @@ export function PreviewModal({
         }
 
         // 5. Bottom Cinematic Movie Bar (during journey)
-        if (elapsed >= journeyStartTime && elapsed < summaryStartTime) {
+        if (elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           ctx.save();
           ctx.textAlign = "center";
           ctx.textBaseline = "alphabetic";
@@ -1088,6 +1260,25 @@ export function PreviewModal({
           );
         }
 
+        // 6.5 Full 2D Route Overview Map (Fade In & Fade Out), right before the summary.
+        // Captured live from the flat RouteOverviewMap's own Mapbox canvas, with
+        // flags/markers positioned via that same map's project() — no static
+        // world-map image or manual crop-math involved anymore.
+        if (elapsed >= routeMapStartTime && elapsed < summaryStartTime) {
+          const routeFade = getFadeOpacity(elapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS);
+          const routeMap = routeOverviewRef.current?.getMap() ?? null;
+          const routeCanvas =
+            frame.current?.querySelector<HTMLCanvasElement>(".route-overview-map .mapboxgl-canvas") ?? null;
+          drawRouteOverviewFrame({
+            ctx,
+            routeCanvas,
+            routeMap,
+            locations,
+            opacity: routeFade,
+            totalTripDistance,
+          });
+        }
+
         // 7. Travel Summary Card Before Outro (Fade In & Fade Out)
         if (elapsed >= summaryStartTime && elapsed < outroStartTime) {
           const sumFade = getFadeOpacity(elapsed - summaryStartTime, SUMMARY_DURATION_MS);
@@ -1101,174 +1292,6 @@ export function PreviewModal({
             elapsedInSummary: elapsed - summaryStartTime,
             summaryDuration: SUMMARY_DURATION_MS,
           });
-          // Simple equirectangular projection: maps every stop's lat/lng into a flat
-          // box of the given width/height, preserving aspect ratio, so the whole route
-          // fits neatly regardless of how spread out the destinations are.
-          function projectRoute(locations: Location[], width: number, height: number, padding = 0.14) {
-            const lats = locations.map((l) => l.lat);
-            const lngs = locations.map((l) => l.lng);
-            let minLat = Math.min(...lats);
-            let maxLat = Math.max(...lats);
-            let minLng = Math.min(...lngs);
-            let maxLng = Math.max(...lngs);
-
-            const latSpan = Math.max(maxLat - minLat, 4);
-            const lngSpan = Math.max(maxLng - minLng, 4);
-            const padLat = latSpan * padding;
-            const padLng = lngSpan * padding;
-            minLat -= padLat;
-            maxLat += padLat;
-            minLng -= padLng;
-            maxLng += padLng;
-
-            const spanLat = maxLat - minLat || 1;
-            const spanLng = maxLng - minLng || 1;
-            const scale = Math.min(width / spanLng, height / spanLat);
-            const usedW = spanLng * scale;
-            const usedH = spanLat * scale;
-            const offsetX = (width - usedW) / 2;
-            const offsetY = (height - usedH) / 2;
-
-            return (loc: Location) => ({
-              x: offsetX + (loc.lng - minLng) * scale,
-              y: offsetY + (maxLat - loc.lat) * scale, // flip so north stays up
-            });
-          }
-
-          // Full 2D route overview card: every stop plotted on a flat map with the
-          // connecting route line, plus a start flag and a finish flag.
-          function drawRouteOverviewMap(options: {
-            ctx: CanvasRenderingContext2D;
-            locations: Location[];
-            opacity: number;
-            totalTripDistance: string;
-          }) {
-            const { ctx, locations, opacity, totalTripDistance } = options;
-            if (opacity <= 0.001 || locations.length === 0) return;
-
-            ctx.save();
-            ctx.globalAlpha = opacity;
-
-            ctx.fillStyle = "rgba(2, 12, 27, 0.94)";
-            ctx.fillRect(0, 0, 1080, 1080);
-
-            ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
-            ctx.shadowBlur = 32;
-            drawRoundedRect(ctx, 60, 50, 960, 980, 32, "#ffffff");
-            ctx.shadowBlur = 0;
-
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillStyle = "#0284c7";
-            ctx.font = "800 15px system-ui, sans-serif";
-            ctx.fillText("🗺️ FULL ROUTE OVERVIEW", 540, 95);
-
-            ctx.fillStyle = "#0f172a";
-            ctx.font = "700 30px Georgia, serif";
-            ctx.fillText(`${locations[0]?.name ?? "Start"} → ${locations.at(-1)?.name ?? "Destination"}`, 540, 134);
-
-            ctx.fillStyle = "#64748b";
-            ctx.font = "600 14px system-ui, sans-serif";
-            ctx.fillText(`Complete 2D route map · ${totalTripDistance} travelled`, 540, 165);
-
-            const mapX = 100;
-            const mapY = 195;
-            const mapW = 880;
-            const mapH = 760;
-            drawRoundedRect(ctx, mapX, mapY, mapW, mapH, 24, "#eef6ff", "#bae6fd", 1.5);
-
-            const project = projectRoute(locations, mapW - 80, mapH - 80);
-            const points = locations.map((loc) => {
-              const p = project(loc);
-              return { x: mapX + 40 + p.x, y: mapY + 40 + p.y, loc };
-            });
-
-            // Clip drawing (graticule + route + dots) to the rounded map box
-            ctx.save();
-            ctx.beginPath();
-            const r = 24;
-            ctx.moveTo(mapX + r, mapY);
-            ctx.arcTo(mapX + mapW, mapY, mapX + mapW, mapY + mapH, r);
-            ctx.arcTo(mapX + mapW, mapY + mapH, mapX, mapY + mapH, r);
-            ctx.arcTo(mapX, mapY + mapH, mapX, mapY, r);
-            ctx.arcTo(mapX, mapY, mapX + mapW, mapY, r);
-            ctx.closePath();
-            ctx.clip();
-
-            // Subtle graticule so it reads as a "map", not just a chart
-            ctx.strokeStyle = "rgba(56, 189, 248, 0.15)";
-            ctx.lineWidth = 1;
-            for (let i = 1; i < 8; i++) {
-              const gx = mapX + (mapW / 8) * i;
-              ctx.beginPath();
-              ctx.moveTo(gx, mapY);
-              ctx.lineTo(gx, mapY + mapH);
-              ctx.stroke();
-            }
-            for (let i = 1; i < 6; i++) {
-              const gy = mapY + (mapH / 6) * i;
-              ctx.beginPath();
-              ctx.moveTo(mapX, gy);
-              ctx.lineTo(mapX + mapW, gy);
-              ctx.stroke();
-            }
-
-            // Route line connecting every stop in order
-            ctx.beginPath();
-            points.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)));
-            ctx.strokeStyle = "#0284c7";
-            ctx.lineWidth = 3.5;
-            ctx.setLineDash([10, 8]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Stop dots (numbered for the middle stops)
-            points.forEach((pt, i) => {
-              const isFirst = i === 0;
-              const isLast = i === points.length - 1;
-              ctx.beginPath();
-              ctx.arc(pt.x, pt.y, isFirst || isLast ? 12 : 8, 0, Math.PI * 2);
-              ctx.fillStyle = isFirst ? "#0284c7" : isLast ? "#16a34a" : "#64748b";
-              ctx.fill();
-              ctx.lineWidth = 2.5;
-              ctx.strokeStyle = "#ffffff";
-              ctx.stroke();
-
-              if (!isFirst && !isLast) {
-                ctx.fillStyle = "#ffffff";
-                ctx.font = "700 10px system-ui, sans-serif";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(`${i + 1}`, pt.x, pt.y + 0.5);
-              }
-            });
-
-            ctx.restore(); // drop the map clip
-
-            // Flags + name pills for start & end, drawn outside the clip so nothing crops
-            points.forEach((pt, i) => {
-              const isFirst = i === 0;
-              const isLast = i === points.length - 1;
-              if (!isFirst && !isLast) return;
-
-              ctx.font = "28px sans-serif";
-              ctx.textAlign = "center";
-              ctx.textBaseline = "bottom";
-              ctx.fillText(isFirst ? "🚩" : "🏁", pt.x, pt.y - 14);
-
-              const label = pt.loc.name;
-              ctx.font = "800 13px system-ui, sans-serif";
-              const labelW = ctx.measureText(label).width + 20;
-              const labelY = pt.y + 26;
-              drawRoundedRect(ctx, pt.x - labelW / 2, labelY, labelW, 24, 12, isFirst ? "#0284c7" : "#16a34a");
-              ctx.fillStyle = "#ffffff";
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillText(label, pt.x, labelY + 12);
-            });
-
-            ctx.restore();
-          }
         }
 
         // 8. Smooth Outro Card (Fade In & Fade Out)
@@ -1404,8 +1427,33 @@ export function PreviewModal({
             style={{ opacity: arrivalMediaOpacity }}
             aria-label={`${destination.name} travel photo`}
           >
-            {activePhotoUrl ? <img src={activePhotoUrl} alt={`${destination.name} travel moment`} /> : null}
-            <div className="arrival-photo-caption">
+            <div className="micro-flash-overlay" key={`flash-${currentLegIndex}-${photoIndex}`} />
+            {(activeSchedule?.images.length ? activeSchedule.images : [destination.imageUrl || ""]).map((url, idx) => {
+              if (!url) return null;
+              const isCurrent = idx === photoIndex;
+              const isPrevious = idx === photoIndex - 1;
+              if (!isCurrent && !isPrevious) return null;
+
+              return (
+                <img
+                  key={url + "-" + idx + "-" + (isCurrent ? photoIndex : "prev")}
+                  src={url}
+                  alt={`${destination.name} travel moment`}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    zIndex: isCurrent ? 2 : 1,
+                    animation: isCurrent
+                      ? "snappyPop 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards"
+                      : "none",
+                  }}
+                />
+              );
+            })}
+            <div className="arrival-photo-caption" style={{ position: "relative", zIndex: 3 }}>
               <span>ARRIVED · STOP {currentLegIndex + 2} OF {totalLegs + 1}</span>
               <h2>{destination.name}</h2>
               <p>
@@ -1421,6 +1469,7 @@ export function PreviewModal({
             style={{ opacity: arrivalMediaOpacity }}
             aria-label={`${destination.name} travel video`}
           >
+            <div className="micro-flash-overlay" key={`flash-${currentLegIndex}`} />
             {activePhotoUrl ? (
               <img
                 src={activePhotoUrl}
@@ -1443,7 +1492,11 @@ export function PreviewModal({
               autoPlay
               playsInline
               muted={muted}
-              style={{ position: "relative", zIndex: 1 }}
+              style={{
+                position: "relative",
+                zIndex: 1,
+                animation: "snappyPop 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards",
+              }}
               onError={() =>
                 setUnavailableVideos((current) =>
                   current.includes(activeSchedule.video!.url) ? current : [...current, activeSchedule.video!.url]
@@ -1474,6 +1527,101 @@ export function PreviewModal({
             </div>
           </div>
         )}
+
+        {/* 2D Route Overview Map — full-screen flat Mapbox instance with floating overlays */}
+        <div
+          className="video-summary-card"
+          style={{
+            opacity: routeMapOpacity,
+            transition: "opacity 0.05s linear",
+            pointerEvents: isRouteMap ? "auto" : "none",
+            zIndex: isRouteMap ? 20 : -1,
+            padding: 0,
+            background: "transparent",
+            backdropFilter: "none",
+          }}
+          aria-live="polite"
+          aria-hidden={!isRouteMap}
+        >
+          {/* Map fills entire screen */}
+          <div style={{ position: "absolute", inset: 0 }}>
+            <RouteOverviewMap ref={routeOverviewRef} locations={locations} />
+          </div>
+
+          {/* Header overlay, top floating */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              padding: "24px 20px 36px",
+              background: "linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%)",
+              zIndex: 2,
+              pointerEvents: "none",
+            }}
+          >
+            <span
+              className="summary-pill"
+              style={{
+                background: "rgba(2, 132, 199, 0.9)",
+                color: "#ffffff",
+                border: "1px solid rgba(56, 189, 248, 0.5)",
+              }}
+            >
+              🗺️ ROUTE OVERVIEW
+            </span>
+            <h2
+              style={{
+                color: "#ffffff",
+                margin: "8px 0 2px",
+                font: "700 clamp(22px, 3.5vw, 30px) Georgia, serif",
+                textShadow: "0 2px 10px rgba(0,0,0,0.8)",
+              }}
+            >
+              {locations[0]?.name} → {locations.at(-1)?.name}
+            </h2>
+            <p
+              style={{
+                color: "#e2e8f0",
+                margin: 0,
+                fontSize: "14px",
+                fontWeight: 600,
+                textShadow: "0 1px 8px rgba(0,0,0,0.8)",
+              }}
+            >
+              Complete 2D route map · {totalTripDistance} travelled
+            </p>
+          </div>
+
+          {/* Start/Finish overlay, bottom floating */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "36px 24px 20px",
+              background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%)",
+              color: "#ffffff",
+              fontSize: "14px",
+              fontWeight: 600,
+              zIndex: 2,
+              pointerEvents: "none",
+              textShadow: "0 1px 8px rgba(0,0,0,0.8)",
+            }}
+          >
+            <span>
+              🚩 Start: <strong>{locations[0]?.name}</strong>
+            </span>
+            <span>
+              🏁 Finish: <strong>{locations.at(-1)?.name}</strong>
+            </span>
+          </div>
+        </div>
 
         {/* Travel Summary Card (Before Outro) with Smooth Fade In & Fade Out */}
         {isSummary && (
@@ -1587,11 +1735,13 @@ export function PreviewModal({
             <span>
               {isIntro
                 ? "Intro · Roamly Studio"
-                : isSummary
-                  ? `Travel Summary · ${totalTripDistance}`
-                  : isOutro
-                    ? "Outro · Journey Complete"
-                    : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
+                : isRouteMap
+                  ? "Route Overview · 2D Map"
+                  : isSummary
+                    ? `Travel Summary · ${totalTripDistance}`
+                    : isOutro
+                      ? "Outro · Journey Complete"
+                      : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

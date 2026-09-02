@@ -1291,7 +1291,8 @@ export function MapboxGlobe({
                   height: "100%",
                   objectFit: "cover",
                   opacity: idx === activePhotoIndex ? 1 : 0,
-                  transition: "opacity 0.9s ease-in-out",
+                  transition: "opacity 0.4s ease-in-out",
+                  animation: idx === activePhotoIndex ? "popIn 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards" : "none",
                 }}
               />
             ))
@@ -1299,7 +1300,14 @@ export function MapboxGlobe({
             <img
               src={arrivalStop.imageUrl}
               alt={arrivalStop.name}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                animation: "popIn 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards",
+              }}
             />
           ) : null}
 

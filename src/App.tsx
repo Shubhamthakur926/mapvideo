@@ -3,7 +3,7 @@ import { useState } from "react";
 import { PreviewModal } from "./travel/PreviewModal";
 import { parseJsonItinerary } from "./travel/json-itinerary";
 import mockJourney from "./travel/mock-journey.json";
-import { getLocationImages } from "./travel/types";
+import { getLocationImages, getLocationVideo } from "./travel/types";
 
 const journey = parseJsonItinerary(JSON.stringify(mockJourney));
 
@@ -16,7 +16,12 @@ function formatTime(seconds: number): string {
 export default function App() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const journeyDuration = journey.locations.slice(1).reduce(
-    (total, location) => total + 4 + Math.max(1, getLocationImages(location).length) * 2,
+    (total, location) => {
+      const video = getLocationVideo(location);
+      const videoSec = video ? (video.duration ?? 5) : 0;
+      const photoSec = Math.max(1, getLocationImages(location).length) * 2;
+      return total + 4 + videoSec + photoSec;
+    },
     0
   );
   const duration = 8.6 + journeyDuration;

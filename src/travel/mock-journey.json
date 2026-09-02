@@ -6,43 +6,209 @@
       "code": "DEL",
       "lat": 28.6139,
       "lng": 77.209,
+      "description": "India Gate & historic capital landmarks",
       "images": [
-        "https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1200&auto=format&fit=crop&q=85"
+        "https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1592635196078-9fdc757f27f4?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1548013146-72479768bada?w=1200&auto=format&fit=crop&q=85"
       ]
-    },{
+    },
+    {
       "name": "Mumbai",
       "country": "India",
       "code": "BOM",
       "lat": 19.076,
       "lng": 72.8777,
       "transport": "flight",
-      "videoUrl": "public/videos/mumbai.mp4",
+      "videoUrl": "/videos/mumbai.mp4",
+      "description": "Gateway of India & Marine Drive coast",
       "images": [
         "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1566552881560-0be862a7c445?w=1200&auto=format&fit=crop&q=85"
+        "https://images.unsplash.com/photo-1566552881560-0be862a7c445?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1595658658481-d53d3f999875?w=1200&auto=format&fit=crop&q=85"
       ]
     },
     {
-      "name": "Jaipur",
-      "country": "India",
-      "code": "JAI",
-      "lat": 26.9124,
-      "lng": 75.7873,
-      "transport": "car",
-      "images": [
-        "https://images.unsplash.com/photo-1599661046289-e31897846e41?w=1200&auto=format&fit=crop&q=85"
-      ]
-    },
-    {
-      "name": "Goa",
+      "name": "Goa Beach",
       "country": "India",
       "code": "GOI",
       "lat": 15.2993,
       "lng": 74.124,
-      "transport": "train",
+      "transport": "bike",
+      "videoUrl": "/videos/goa.webm",
+      "description": "Palolem Beach & tropical palm shores",
       "images": [
         "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&auto=format&fit=crop&q=85"
+        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Dubai",
+      "country": "United Arab Emirates",
+      "code": "DXB",
+      "lat": 25.2048,
+      "lng": 55.2708,
+      "transport": "flight",
+      "description": "Burj Khalifa & futuristic desert marina",
+      "images": [
+        "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1518684079-3c830dcef090?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1580674684081-7617fbf3d745?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Naples",
+      "country": "Italy",
+      "code": "NAP",
+      "lat": 40.8518,
+      "lng": 14.2681,
+      "transport": "flight",
+      "description": "Gulf of Naples & Mount Vesuvius coastline",
+      "images": [
+        "https://images.unsplash.com/photo-1534445867742-43195f401b6c?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1516483638261-f4dbaf036963?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Rome",
+      "country": "Italy",
+      "code": "FCO",
+      "lat": 41.9028,
+      "lng": 12.4964,
+      "transport": "car",
+      "description": "Colosseum & ancient Roman architecture",
+      "images": [
+        "https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1529260830199-42c24126f198?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1531572753322-ad063cecc140?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Paris",
+      "country": "France",
+      "code": "CDG",
+      "lat": 48.8566,
+      "lng": 2.3522,
+      "transport": "train",
+      "description": "Eiffel Tower & iconic Louvre museum",
+      "images": [
+        "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1522093007474-d86e9bf7ba6f?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1499856871958-5b9627545d1a?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "London",
+      "country": "United Kingdom",
+      "code": "LHR",
+      "lat": 51.5074,
+      "lng": -0.1278,
+      "transport": "train",
+      "videoUrl": "/videos/london.webm",
+      "description": "Big Ben, Tower Bridge & Trafalgar Square",
+      "images": [
+        "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1526129318478-62ed807ebdf9?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1533929736458-ca588d08c8be?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Cambridge",
+      "country": "United Kingdom",
+      "code": "CBG",
+      "lat": 52.2053,
+      "lng": 0.1218,
+      "transport": "bus",
+      "description": "King's College Chapel & River Cam punting",
+      "images": [
+        "https://images.unsplash.com/photo-1564604761388-83eafc96f668?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1590059390046-512c1c696e59?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1582234372722-50d7ccc30ebd?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Athens",
+      "country": "Greece",
+      "code": "ATH",
+      "lat": 37.9838,
+      "lng": 23.7275,
+      "transport": "flight",
+      "description": "Acropolis & ancient Parthenon citadel",
+      "images": [
+        "https://images.unsplash.com/photo-1555993539-1732916b8235?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1603565816030-6b389eeb23cb?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Santorini",
+      "country": "Greece",
+      "code": "JTR",
+      "lat": 36.3932,
+      "lng": 25.4615,
+      "transport": "ship",
+      "description": "Oia blue domes & volcanic caldera views",
+      "images": [
+        "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "New York",
+      "country": "United States",
+      "code": "JFK",
+      "lat": 40.6413,
+      "lng": -73.7781,
+      "transport": "flight",
+      "description": "JFK International & Manhattan gateway",
+      "images": [
+        "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1485871981521-5b1fd3805eee?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Central Park",
+      "country": "United States",
+      "code": "NYC",
+      "lat": 40.7829,
+      "lng": -73.9654,
+      "transport": "taxi",
+      "description": "Bow Bridge, Bethesda Terrace & Manhattan skyline",
+      "images": [
+        "https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1576085898323-218337e3e43c?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1518391846015-55a9cc003b25?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "Brooklyn Bridge",
+      "country": "United States",
+      "code": "BKB",
+      "lat": 40.7061,
+      "lng": -73.9969,
+      "transport": "bicycle",
+      "description": "Iconic suspension bridge & East River vistas",
+      "images": [
+        "https://images.unsplash.com/photo-1513584684374-8bab748fbf90?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1506146332389-18140dc7b2fb?w=1200&auto=format&fit=crop&q=85"
+      ]
+    },
+    {
+      "name": "DUMBO Waterfront",
+      "country": "United States",
+      "code": "DMB",
+      "lat": 40.7033,
+      "lng": -73.9897,
+      "transport": "walking",
+      "description": "Manhattan Bridge view from Washington Street",
+      "images": [
+        "https://images.unsplash.com/photo-1506146332389-18140dc7b2fb?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1538688525198-9b88f6f53126?w=1200&auto=format&fit=crop&q=85",
+        "https://images.unsplash.com/photo-1543783207-ec64e4d95325?w=1200&auto=format&fit=crop&q=85"
       ]
     }
   ]

@@ -160,14 +160,30 @@ function drawBrandingCard(
   ctx.restore();
 }
 
-function drawTravelSummaryCard(
-  ctx: CanvasRenderingContext2D,
-  locations: Location[],
-  legs: Transport[],
-  totalTripDistance: string,
-  preloadedImgs: Map<string, HTMLImageElement>,
-  opacity: number
-) {
+interface SummaryCardOptions {
+  ctx: CanvasRenderingContext2D;
+  locations: Location[];
+  legs: Transport[];
+  totalTripDistance: string;
+  preloadedImgs: Map<string, HTMLImageElement>;
+  opacity: number;
+  elapsedInSummary?: number;
+  summaryDuration?: number;
+}
+
+function drawTravelSummaryCard(options: SummaryCardOptions) {
+  const {
+    ctx,
+    locations,
+    legs,
+    totalTripDistance,
+    preloadedImgs,
+    opacity,
+    elapsedInSummary = 0,
+    summaryDuration = SUMMARY_DURATION_MS,
+  } = options;
+  const currentElapsed = elapsedInSummary;
+  const currentDuration = summaryDuration;
   if (opacity <= 0.001) return;
   ctx.save();
   ctx.globalAlpha = opacity;
@@ -179,7 +195,7 @@ function drawTravelSummaryCard(
   // Main container card
   ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
   ctx.shadowBlur = 36;
-  drawRoundedRect(ctx, 60, 60, 960, 960, 32, "#ffffff");
+  drawRoundedRect(ctx, 60, 50, 960, 980, 32, "#ffffff");
   ctx.shadowBlur = 0;
 
   // Header Title
@@ -187,22 +203,22 @@ function drawTravelSummaryCard(
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#0284c7";
   ctx.font = "800 15px system-ui, sans-serif";
-  ctx.fillText("✨ TRAVEL SUMMARY · ITINERARY RECAP", 540, 115);
+  ctx.fillText("✨ TRAVEL SUMMARY · ITINERARY RECAP", 540, 95);
 
   ctx.fillStyle = "#0f172a";
-  ctx.font = "700 36px Georgia, serif";
+  ctx.font = "700 34px Georgia, serif";
   const startLoc = locations[0]?.name || "Start";
   const endLoc = locations[locations.length - 1]?.name || "Destination";
-  ctx.fillText(`${startLoc} → ${endLoc}`, 540, 160);
+  ctx.fillText(`${startLoc} → ${endLoc}`, 540, 138);
 
   ctx.fillStyle = "#64748b";
-  ctx.font = "600 15px system-ui, sans-serif";
-  ctx.fillText("Complete journey overview & route statistics", 540, 198);
+  ctx.font = "600 14px system-ui, sans-serif";
+  ctx.fillText("Complete journey overview & route statistics", 540, 172);
 
   // 4 Key Statistics Cards in a grid row
-  const statBoxY = 230;
+  const statBoxY = 196;
   const statW = 205;
-  const statH = 88;
+  const statH = 82;
   const statGap = 16;
   const statStartX = 540 - (4 * statW + 3 * statGap) / 2;
 
@@ -222,119 +238,135 @@ function drawTravelSummaryCard(
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#0284c7";
     ctx.font = "800 11px system-ui, sans-serif";
-    ctx.fillText(`${stat.icon} ${stat.label}`, sx + statW / 2, statBoxY + 28);
+    ctx.fillText(`${stat.icon} ${stat.label}`, sx + statW / 2, statBoxY + 26);
     ctx.fillStyle = "#0f172a";
-    ctx.font = "700 18px Georgia, serif";
-    ctx.fillText(stat.val, sx + statW / 2, statBoxY + 58);
+    ctx.font = "700 17px Georgia, serif";
+    ctx.fillText(stat.val, sx + statW / 2, statBoxY + 54);
   });
 
-  // Stops list container - DYNAMIC height based on number of locations
-  const stopsListY = 338;
-  const maxStopsListH = 645;
+  // Stops list container with smooth auto-scroll window
+  const stopsListY = 296;
+  const stopsListH = 710;
+  const headerH = 46;
+  const clipY = stopsListY + headerH;
+  const clipH = stopsListH - headerH - 14;
 
-  // Calculate how many stops can fit with adaptive row height
-  const headerHeight = 45;
-  const minRowHeight = 52;
-  const maxRowHeight = 84;
-
-  // Calculate optimal row height based on number of locations
-  const availableHeight = maxStopsListH - headerHeight - 10;
-  const calculatedRowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableHeight / locations.length));
-  const totalStopsHeight = Math.min(maxStopsListH, headerHeight + 10 + (locations.length * calculatedRowH));
-
-  drawRoundedRect(ctx, 90, stopsListY, 900, totalStopsHeight, 22, "#f8fafc", "#e2e8f0", 1.5);
+  drawRoundedRect(ctx, 90, stopsListY, 900, stopsListH, 22, "#f8fafc", "#e2e8f0", 1.5);
 
   ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
   ctx.fillStyle = "#1e293b";
   ctx.font = "800 14px system-ui, sans-serif";
-  ctx.fillText(`📍 ALL ${locations.length} DESTINATIONS & CONNECTING ROUTES`, 120, stopsListY + 32);
+  ctx.fillText(`📍 ALL ${locations.length} DESTINATIONS & CONNECTING ROUTES`, 120, stopsListY + 24);
 
-  // Render ALL stops with adaptive sizing
-  const displayStops = locations; // Show ALL locations
-  const availableRowHeight = totalStopsHeight - headerHeight - 10;
-  const rowH = Math.min(maxRowHeight, Math.max(minRowHeight, availableRowHeight / displayStops.length));
-  const startRowY = stopsListY + 55;
+  // Row dimensions
+  const rowH = 68;
+  const rowPadding = 8;
+  const totalContentH = locations.length * rowH;
+  const maxScroll = Math.max(0, totalContentH - clipH + 12);
+  const scrollProgress = maxScroll > 0 ? Math.min(1, Math.max(0, (currentElapsed - 500) / (currentDuration - 1200))) : 0;
+  const easeProgress = 0.5 - 0.5 * Math.cos(Math.PI * scrollProgress);
+  const scrollY = easeProgress * maxScroll;
 
-  displayStops.forEach((loc, i) => {
-    const ry = startRowY + i * rowH;
+  // Clip viewport to the stops box so nothing ever overflows
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(90, clipY, 900, clipH);
+  ctx.clip();
+
+  locations.forEach((loc, i) => {
+    const ry = clipY + i * rowH - scrollY;
+    if (ry + rowH < clipY - 10 || ry > clipY + clipH + 10) return;
+
     const isFirst = i === 0;
     const isLast = i === locations.length - 1;
 
-    // Row card with reduced padding for many stops
-    const rowPadding = locations.length > 10 ? 4 : 8;
-    drawRoundedRect(ctx, 115, ry, 850, rowH - rowPadding, 14, "#ffffff", isLast ? "#86efac" : isFirst ? "#bae6fd" : "#e2e8f0", 1.5);
+    drawRoundedRect(
+      ctx,
+      115,
+      ry,
+      850,
+      rowH - rowPadding,
+      14,
+      "#ffffff",
+      isLast ? "#86efac" : isFirst ? "#bae6fd" : "#e2e8f0",
+      1.5
+    );
 
-    // Stop number circle - adaptive size
-    const circleSize = locations.length > 12 ? 24 : locations.length > 8 ? 28 : 34;
+    // Stop number badge
+    const circleSize = 30;
     const circleX = 130;
     const circleY = ry + (rowH - rowPadding - circleSize) / 2;
     const numColor = isLast ? "#16a34a" : isFirst ? "#0284c7" : "#475569";
-    drawRoundedRect(ctx, circleX, circleY, circleSize, circleSize, circleSize / 2, numColor);
+    drawRoundedRect(ctx, circleX, circleY, circleSize, circleSize, 15, numColor);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ffffff";
-    const circleFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 11 : 14;
-    ctx.font = `800 ${circleFontSize}px system-ui, sans-serif`;
-    ctx.fillText(`${i + 1}`, circleX + circleSize / 2, circleY + circleSize / 2);
+    ctx.font = "800 13px system-ui, sans-serif";
+    ctx.fillText(`${i + 1}`, circleX + 15, circleY + 15);
 
-    // Stop thumbnail image - adaptive size
+    // Stop thumbnail image
     const img = preloadedImgs.get(loc.imageUrl || "");
-    const thumbSize = locations.length > 12 ? 32 : locations.length > 8 ? 40 : 48;
     if (img) {
-      drawRoundedImage(ctx, img, 178, ry + (rowH - rowPadding - thumbSize) / 2, thumbSize, thumbSize, 6);
+      drawRoundedImage(ctx, img, 172, ry + (rowH - rowPadding - 44) / 2, 54, 44, 8);
     }
 
-    // Stop Name & Country - adaptive font sizes
-    const textStartX = img ? 178 + thumbSize + 10 : 180;
-    const nameFontSize = locations.length > 12 ? 12 : locations.length > 8 ? 14 : 17;
-    const countryFontSize = locations.length > 12 ? 9 : locations.length > 8 ? 10 : 12;
-
+    // Stop Name & Country
+    const textStartX = img ? 236 : 178;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#0f172a";
-    ctx.font = `700 ${nameFontSize}px system-ui, sans-serif`;
-
-    // Truncate long names to prevent overflow
-    const maxNameWidth = locations.length > 12 ? 120 : 200;
-    let displayName = loc.name;
-    if (ctx.measureText(displayName).width > maxNameWidth) {
-      while (ctx.measureText(displayName + "...").width > maxNameWidth && displayName.length > 1) {
-        displayName = displayName.slice(0, -1);
-      }
-      displayName += "...";
-    }
-    ctx.fillText(displayName, textStartX, ry + 6);
+    ctx.font = "700 16px Georgia, serif";
+    ctx.fillText(loc.name, textStartX, ry + 10);
 
     ctx.fillStyle = "#64748b";
-    ctx.font = `600 ${countryFontSize}px system-ui, sans-serif`;
-    ctx.fillText(`${loc.country} · ${loc.code}`, textStartX, ry + 6 + nameFontSize + 2);
+    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.fillText(`${loc.country} · ${loc.code}`, textStartX, ry + 32);
 
-    // Connecting Transport or Arrival badge - adaptive size
-    const badgeWidth = locations.length > 12 ? 120 : locations.length > 8 ? 150 : 175;
-    const badgeHeight = locations.length > 12 ? 20 : locations.length > 8 ? 24 : 28;
-    const badgeFontSize = locations.length > 12 ? 8 : locations.length > 8 ? 9 : 11;
-    const badgeX = 950 - badgeWidth - 20;
+    // Connecting Transport or Arrival badge
+    const badgeW = 160;
+    const badgeH = 28;
+    const badgeX = 965 - 115 - badgeW;
+    const badgeY = ry + (rowH - rowPadding - badgeH) / 2;
 
     if (i < locations.length - 1) {
       const legTransport = legs[i] || "flight";
       const tEmoji = vehicleMarks[legTransport] || "✈️";
       const tLabel = legTransport.toUpperCase();
-      drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#e0f2fe", "#bae6fd", 1);
+      drawRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, 14, "#e0f2fe", "#bae6fd", 1);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#0369a1";
-      ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
-      const badgeText = locations.length > 12 ? `${tEmoji} ${tLabel}` : `${tEmoji} Next: ${tLabel}`;
-      ctx.fillText(badgeText, badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
+      ctx.font = "800 11px system-ui, sans-serif";
+      ctx.fillText(`${tEmoji} Next: ${tLabel}`, badgeX + badgeW / 2, badgeY + badgeH / 2);
     } else {
-      drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#dcfce7", "#86efac", 1);
+      drawRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, 14, "#dcfce7", "#86efac", 1);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#15803d";
-      ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
-      ctx.fillText("🏁 Final", badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
+      ctx.font = "800 11px system-ui, sans-serif";
+      ctx.fillText("🏁 Final Destination", badgeX + badgeW / 2, badgeY + badgeH / 2);
     }
   });
+
+  ctx.restore();
+
+  // Smooth top and bottom gradient fades on the scroll container
+  if (maxScroll > 0) {
+    // Top fade
+    const topGrad = ctx.createLinearGradient(0, clipY, 0, clipY + 28);
+    topGrad.addColorStop(0, "rgba(248, 250, 252, 0.96)");
+    topGrad.addColorStop(1, "rgba(248, 250, 252, 0)");
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(90, clipY, 900, 28);
+
+    // Bottom fade
+    const btmGrad = ctx.createLinearGradient(0, clipY + clipH - 32, 0, clipY + clipH);
+    btmGrad.addColorStop(0, "rgba(248, 250, 252, 0)");
+    btmGrad.addColorStop(1, "rgba(248, 250, 252, 0.96)");
+    ctx.fillStyle = btmGrad;
+    ctx.fillRect(90, clipY + clipH - 32, 900, 32);
+  }
 
   ctx.restore();
 }
@@ -478,17 +510,20 @@ export function PreviewModal({
 
   // Timestamps
   const journeyStartTime = INTRO_DURATION_MS;
-  const summaryStartTime = journeyStartTime + totalJourneyDuration;
+  const routeMapStartTime = journeyStartTime + totalJourneyDuration;
+  const summaryStartTime = routeMapStartTime + ROUTE_MAP_DURATION_MS;
   const outroStartTime = summaryStartTime + SUMMARY_DURATION_MS;
 
   // Active Phase Checks
   const isIntro = timelineElapsed < journeyStartTime;
-  const isJourney = timelineElapsed >= journeyStartTime && timelineElapsed < summaryStartTime;
+  const isJourney = timelineElapsed >= journeyStartTime && timelineElapsed < routeMapStartTime;
+  const isRouteMap = timelineElapsed >= routeMapStartTime && timelineElapsed < summaryStartTime;
   const isSummary = timelineElapsed >= summaryStartTime && timelineElapsed < outroStartTime;
   const isOutro = timelineElapsed >= outroStartTime;
 
   // Smooth Opacity Envelopes (Fade In & Fade Out)
   const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS) : 0;
+  const routeMapOpacity = isRouteMap ? getFadeOpacity(timelineElapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS) : 0;
   const summaryOpacity = isSummary ? getFadeOpacity(timelineElapsed - summaryStartTime, SUMMARY_DURATION_MS) : 0;
   const outroOpacity = isOutro ? getFadeOpacity(timelineElapsed - outroStartTime, OUTRO_DURATION_MS) : 0;
 
@@ -511,26 +546,19 @@ export function PreviewModal({
   const currentLegIndex = activeSchedule?.index ?? 0;
   const destination = activeSchedule?.stop ?? locations.at(-1)!;
   const isArrivalPhase = elapsedInLeg >= VEHICLE_LEG_DURATION_MS;
-  const videoDurationMs = activeSchedule?.video
-    ? (clipDurations[activeSchedule.video.url] ?? activeSchedule.video.duration ?? 6) * 1000
-    : 0;
-  const isVideoShowcase =
-    isArrivalPhase &&
-    Boolean(activeSchedule?.video) &&
-    !unavailableVideos.includes(activeSchedule?.video?.url ?? "") &&
-    elapsedInLeg - VEHICLE_LEG_DURATION_MS < videoDurationMs;
-  const showDestinationPhoto = isArrivalPhase && Boolean(destination?.imageUrl || activeSchedule?.images.length);
+  const videoDurationMs = activeSchedule?.videoDurationMs ?? 0;
+  const isVideoScheduled = isArrivalPhase && videoDurationMs > 0 && (elapsedInLeg - VEHICLE_LEG_DURATION_MS < videoDurationMs);
+  const isVideoShowcase = isVideoScheduled && Boolean(activeSchedule?.video) && !unavailableVideos.includes(activeSchedule?.video?.url ?? "");
+  const isPhotoShowcase = isArrivalPhase && (!isVideoShowcase || !activeSchedule?.video);
   const isMediaShowcase = isArrivalPhase;
   const arrivalMediaDuration = Math.max(0, (activeSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
   const arrivalMediaOpacity = isArrivalPhase
     ? getFadeOpacity(elapsedInLeg - VEHICLE_LEG_DURATION_MS, arrivalMediaDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
     : 0;
   const travelProgress = Math.min(1, elapsedInLeg / VEHICLE_LEG_DURATION_MS);
-  const photoIndex = isArrivalPhase
-    ? Math.min(
-        Math.max(0, (activeSchedule?.photoCount ?? 1) - 1),
-        Math.floor(Math.max(0, elapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS)
-      )
+  const photoElapsedInLeg = Math.max(0, elapsedInLeg - VEHICLE_LEG_DURATION_MS - videoDurationMs);
+  const photoIndex = isPhotoShowcase
+    ? Math.min(Math.max(0, (activeSchedule?.photoCount ?? 1) - 1), Math.floor(photoElapsedInLeg / PHOTO_DURATION_MS))
     : 0;
   const activePhotoUrl = activeSchedule?.images[photoIndex] || destination?.imageUrl || "";
   // Mapbox uses equal-width leg progress. Keep it on the current route while photos are shown.
@@ -827,10 +855,9 @@ export function PreviewModal({
         const arrivalStop = recSchedule?.stop || locations[locations.length - 1];
         const arrivalImages = recSchedule?.images || getLocationImages(arrivalStop);
         const totalPhotos = Math.max(1, recSchedule?.photoCount ?? arrivalImages.length);
-        const recVideoStart = VEHICLE_LEG_DURATION_MS;
         const recVideoDurationMs = recSchedule?.videoDurationMs ?? 0;
         const recArrivalElapsed = Math.max(0, recElapsedInLeg - VEHICLE_LEG_DURATION_MS);
-        const isRecVideoActive = isArrival && recVideoDurationMs > 0 && recArrivalElapsed < recVideoDurationMs;
+        const isRecVideoActive = isArrival && recVideoDurationMs > 0 && (recArrivalElapsed < recVideoDurationMs);
         const recVideo = isRecVideoActive && recSchedule?.video ? recSchedule.video : null;
         const isRecPhotoPhase = isArrival && (!recSchedule?.video || recArrivalElapsed >= recVideoDurationMs);
         const recPhotoElapsed = isRecPhotoPhase ? Math.max(0, recArrivalElapsed - recVideoDurationMs) : 0;
@@ -851,7 +878,6 @@ export function PreviewModal({
         const photoIdx = isRecPhotoPhase
           ? Math.min(totalPhotos - 1, Math.floor(recPhotoElapsed / PHOTO_DURATION_MS))
           : 0;
-        const photoElapsed = isRecPhotoPhase ? recPhotoElapsed - photoIdx * PHOTO_DURATION_MS : 0;
         const curSec = Math.floor(elapsed / 1000);
 
         // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
@@ -970,6 +996,7 @@ export function PreviewModal({
 
             // Smooth crossfade dissolve into the next full-screen photo during
             // the last 25% of each photo's on-screen duration
+            const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
             const photoLocalProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_DURATION_MS));
             if (photoLocalProgress > 0.75 && photoIdx < totalPhotos - 1) {
               const nextPhotoUrl = arrivalImages[photoIdx + 1] || "";
@@ -1064,14 +1091,184 @@ export function PreviewModal({
         // 7. Travel Summary Card Before Outro (Fade In & Fade Out)
         if (elapsed >= summaryStartTime && elapsed < outroStartTime) {
           const sumFade = getFadeOpacity(elapsed - summaryStartTime, SUMMARY_DURATION_MS);
-          drawTravelSummaryCard(
+          drawTravelSummaryCard({
             ctx,
             locations,
             legs,
             totalTripDistance,
             preloadedImgs,
-            sumFade
-          );
+            opacity: sumFade,
+            elapsedInSummary: elapsed - summaryStartTime,
+            summaryDuration: SUMMARY_DURATION_MS,
+          });
+          // Simple equirectangular projection: maps every stop's lat/lng into a flat
+          // box of the given width/height, preserving aspect ratio, so the whole route
+          // fits neatly regardless of how spread out the destinations are.
+          function projectRoute(locations: Location[], width: number, height: number, padding = 0.14) {
+            const lats = locations.map((l) => l.lat);
+            const lngs = locations.map((l) => l.lng);
+            let minLat = Math.min(...lats);
+            let maxLat = Math.max(...lats);
+            let minLng = Math.min(...lngs);
+            let maxLng = Math.max(...lngs);
+
+            const latSpan = Math.max(maxLat - minLat, 4);
+            const lngSpan = Math.max(maxLng - minLng, 4);
+            const padLat = latSpan * padding;
+            const padLng = lngSpan * padding;
+            minLat -= padLat;
+            maxLat += padLat;
+            minLng -= padLng;
+            maxLng += padLng;
+
+            const spanLat = maxLat - minLat || 1;
+            const spanLng = maxLng - minLng || 1;
+            const scale = Math.min(width / spanLng, height / spanLat);
+            const usedW = spanLng * scale;
+            const usedH = spanLat * scale;
+            const offsetX = (width - usedW) / 2;
+            const offsetY = (height - usedH) / 2;
+
+            return (loc: Location) => ({
+              x: offsetX + (loc.lng - minLng) * scale,
+              y: offsetY + (maxLat - loc.lat) * scale, // flip so north stays up
+            });
+          }
+
+          // Full 2D route overview card: every stop plotted on a flat map with the
+          // connecting route line, plus a start flag and a finish flag.
+          function drawRouteOverviewMap(options: {
+            ctx: CanvasRenderingContext2D;
+            locations: Location[];
+            opacity: number;
+            totalTripDistance: string;
+          }) {
+            const { ctx, locations, opacity, totalTripDistance } = options;
+            if (opacity <= 0.001 || locations.length === 0) return;
+
+            ctx.save();
+            ctx.globalAlpha = opacity;
+
+            ctx.fillStyle = "rgba(2, 12, 27, 0.94)";
+            ctx.fillRect(0, 0, 1080, 1080);
+
+            ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+            ctx.shadowBlur = 32;
+            drawRoundedRect(ctx, 60, 50, 960, 980, 32, "#ffffff");
+            ctx.shadowBlur = 0;
+
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "#0284c7";
+            ctx.font = "800 15px system-ui, sans-serif";
+            ctx.fillText("🗺️ FULL ROUTE OVERVIEW", 540, 95);
+
+            ctx.fillStyle = "#0f172a";
+            ctx.font = "700 30px Georgia, serif";
+            ctx.fillText(`${locations[0]?.name ?? "Start"} → ${locations.at(-1)?.name ?? "Destination"}`, 540, 134);
+
+            ctx.fillStyle = "#64748b";
+            ctx.font = "600 14px system-ui, sans-serif";
+            ctx.fillText(`Complete 2D route map · ${totalTripDistance} travelled`, 540, 165);
+
+            const mapX = 100;
+            const mapY = 195;
+            const mapW = 880;
+            const mapH = 760;
+            drawRoundedRect(ctx, mapX, mapY, mapW, mapH, 24, "#eef6ff", "#bae6fd", 1.5);
+
+            const project = projectRoute(locations, mapW - 80, mapH - 80);
+            const points = locations.map((loc) => {
+              const p = project(loc);
+              return { x: mapX + 40 + p.x, y: mapY + 40 + p.y, loc };
+            });
+
+            // Clip drawing (graticule + route + dots) to the rounded map box
+            ctx.save();
+            ctx.beginPath();
+            const r = 24;
+            ctx.moveTo(mapX + r, mapY);
+            ctx.arcTo(mapX + mapW, mapY, mapX + mapW, mapY + mapH, r);
+            ctx.arcTo(mapX + mapW, mapY + mapH, mapX, mapY + mapH, r);
+            ctx.arcTo(mapX, mapY + mapH, mapX, mapY, r);
+            ctx.arcTo(mapX, mapY, mapX + mapW, mapY, r);
+            ctx.closePath();
+            ctx.clip();
+
+            // Subtle graticule so it reads as a "map", not just a chart
+            ctx.strokeStyle = "rgba(56, 189, 248, 0.15)";
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 8; i++) {
+              const gx = mapX + (mapW / 8) * i;
+              ctx.beginPath();
+              ctx.moveTo(gx, mapY);
+              ctx.lineTo(gx, mapY + mapH);
+              ctx.stroke();
+            }
+            for (let i = 1; i < 6; i++) {
+              const gy = mapY + (mapH / 6) * i;
+              ctx.beginPath();
+              ctx.moveTo(mapX, gy);
+              ctx.lineTo(mapX + mapW, gy);
+              ctx.stroke();
+            }
+
+            // Route line connecting every stop in order
+            ctx.beginPath();
+            points.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)));
+            ctx.strokeStyle = "#0284c7";
+            ctx.lineWidth = 3.5;
+            ctx.setLineDash([10, 8]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Stop dots (numbered for the middle stops)
+            points.forEach((pt, i) => {
+              const isFirst = i === 0;
+              const isLast = i === points.length - 1;
+              ctx.beginPath();
+              ctx.arc(pt.x, pt.y, isFirst || isLast ? 12 : 8, 0, Math.PI * 2);
+              ctx.fillStyle = isFirst ? "#0284c7" : isLast ? "#16a34a" : "#64748b";
+              ctx.fill();
+              ctx.lineWidth = 2.5;
+              ctx.strokeStyle = "#ffffff";
+              ctx.stroke();
+
+              if (!isFirst && !isLast) {
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "700 10px system-ui, sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(`${i + 1}`, pt.x, pt.y + 0.5);
+              }
+            });
+
+            ctx.restore(); // drop the map clip
+
+            // Flags + name pills for start & end, drawn outside the clip so nothing crops
+            points.forEach((pt, i) => {
+              const isFirst = i === 0;
+              const isLast = i === points.length - 1;
+              if (!isFirst && !isLast) return;
+
+              ctx.font = "28px sans-serif";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "bottom";
+              ctx.fillText(isFirst ? "🚩" : "🏁", pt.x, pt.y - 14);
+
+              const label = pt.loc.name;
+              ctx.font = "800 13px system-ui, sans-serif";
+              const labelW = ctx.measureText(label).width + 20;
+              const labelY = pt.y + 26;
+              drawRoundedRect(ctx, pt.x - labelW / 2, labelY, labelW, 24, 12, isFirst ? "#0284c7" : "#16a34a");
+              ctx.fillStyle = "#ffffff";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText(label, pt.x, labelY + 12);
+            });
+
+            ctx.restore();
+          }
         }
 
         // 8. Smooth Outro Card (Fade In & Fade Out)
@@ -1111,9 +1308,8 @@ export function PreviewModal({
     const endName = locations[locations.length - 1]?.name
       ? locations[locations.length - 1].name.toLowerCase().replace(/\s+/g, "-")
       : "end";
-    link.download = `roamly-${startName}-to-${endName}-1080p-journey.${
-      mime.startsWith("video/mp4") ? "mp4" : "webm"
-    }`;
+    link.download = `roamly-${startName}-to-${endName}-1080p-journey.${mime.startsWith("video/mp4") ? "mp4" : "webm"
+      }`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1202,7 +1398,7 @@ export function PreviewModal({
           showVehicle={!isMediaShowcase}
         />
 
-        {isJourney && showDestinationPhoto && !isVideoShowcase && (
+        {isJourney && isPhotoShowcase && !isVideoShowcase && (
           <section
             className="arrival-photo-fullscreen"
             style={{ opacity: arrivalMediaOpacity }}
@@ -1392,10 +1588,10 @@ export function PreviewModal({
               {isIntro
                 ? "Intro · Roamly Studio"
                 : isSummary
-                ? `Travel Summary · ${totalTripDistance}`
-                : isOutro
-                ? "Outro · Journey Complete"
-                : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
+                  ? `Travel Summary · ${totalTripDistance}`
+                  : isOutro
+                    ? "Outro · Journey Complete"
+                    : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

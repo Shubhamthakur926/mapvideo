@@ -15,12 +15,15 @@ function formatTime(seconds: number): string {
 
 export default function App() {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const journeyDuration = journey.locations.slice(1).reduce<number>((total, location) => {
-    const video = getLocationVideo(location);
-    const videoSec = video ? (video.duration ?? 5) : 0;
-    const photoSec = Math.max(1, getLocationImages(location).length) * 2;
-    return total + 4 + videoSec + photoSec;
-  }, 0);
+  const journeyDuration = journey.locations.slice(1).reduce(
+    (total, location) => {
+      const video = getLocationVideo(location);
+      const videoSec = video ? (video.duration ?? 5) : 0;
+      const photoSec = Math.max(1, getLocationImages(location).length) * 2;
+      return total + 4 + videoSec + photoSec;
+    },
+    0
+  );
   const duration = 8.6 + journeyDuration;
   const startName = journey.locations[0]?.name ?? "Start";
   const endName = journey.locations.at(-1)?.name ?? "Destination";

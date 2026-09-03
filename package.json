@@ -9,23 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.112.3",
-    "@types/mapbox-gl": "^3.4.1",
-    "@types/three": "^0.185.4",
-    "leaflet": "^1.9.4",
     "lucide-react": "^1.33.0",
     "mapbox-gl": "^3.29.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-globe.gl": "^2.38.0",
-    "react-leaflet": "^5.0.0",
-    "react-router-dom": "^7.13.1",
-    "recharts": "^3.10.1",
-    "sip.js": "^0.21.2",
-    "three": "^0.185.1"
+    "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
+    "@types/geojson": "^7946.0.16",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "latest",

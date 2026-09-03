@@ -1,0 +1,51 @@
+.mapbox-vehicle-svg-container {
+  isolation: isolate;
+  animation: travel-boast-ride 0.75s ease-in-out infinite alternate;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* Dynamic suspension bounce for ground & water travel */
+@keyframes travel-boast-ride {
+  0% {
+    transform: translateY(0px) scale(1) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-2.5px) scale(1.02) rotate(1.2deg);
+  }
+  100% {
+    transform: translateY(-0.5px) scale(0.99) rotate(-1.2deg);
+  }
+}
+
+.mapbox-vehicle-svg-container.is-flight {
+  animation: flight-soar 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes flight-soar {
+  0% {
+    transform: translateY(0px) scale(1) rotate(-0.5deg);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.04) rotate(0.8deg);
+  }
+  100% {
+    transform: translateY(1px) scale(0.98) rotate(-0.8deg);
+  }
+}
+
+.mapbox-vehicle-svg-container.is-ship {
+  animation: ship-bob 2.2s ease-in-out infinite alternate;
+}
+
+@keyframes ship-bob {
+  0% {
+    transform: translateY(0px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(2deg);
+  }
+  100% {
+    transform: translateY(1.5px) rotate(-1deg);
+  }
+}

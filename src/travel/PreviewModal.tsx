@@ -1,33 +1,22 @@
 import { Download, Expand, Loader2, Pause, Play, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { calculateDistanceKm, formatDistanceKm, MapboxGlobe } from "./MapboxGlobe";
+import { calculateBearing, calculateDistanceKm, formatDistanceKm, getLegCoordinates, getPointAlongPolyline, MapboxGlobe } from "./MapboxGlobe";
 import { getLocationImages, getLocationVideo, type Location, type Transport } from "./types";
+import { drawRealisticVehicleOnCanvas, getCachedVehicleImage, getVehicleName } from "./vehicleRender";
 import "./map-video.css";
 import "./video-controls.css";
-
-const vehicleMarks: Record<Transport, string> = {
-  car: "🚗",
-  bike: "🏍️",
-  flight: "✈️",
-  train: "🚆",
-  taxi: "🚕",
-  bicycle: "🚲",
-  bus: "🚌",
-  walking: "🚶",
-  ship: "🚢",
-};
 
 const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
 const BACKGROUND_MUSIC_VOLUME = 0.6;
 const BRAND_LOGO_URL = "/picture/App-logo.png";
 
-// Stage Durations
-const INTRO_DURATION_MS = 2500;
-const SUMMARY_DURATION_MS = 3600;
-const OUTRO_DURATION_MS = 2500;
-const FADE_TRANSITION_MS = 500;
-const VEHICLE_LEG_DURATION_MS = 4000;
-const PHOTO_DURATION_MS = 2000;
+// Stage Durations (Relaxed, smooth cinematic pacing)
+const INTRO_DURATION_MS = 3000;
+const SUMMARY_DURATION_MS = 4500;
+const OUTRO_DURATION_MS = 3000;
+const FADE_TRANSITION_MS = 600;
+const VEHICLE_LEG_DURATION_MS = 6500; // 6.5s per leg: smooth, clearly visible vehicle travel
+const PHOTO_DURATION_MS = 3000; // 3.0s per destination photo: comfortable landmark showcase
 const EXPORT_FRAME_RATE = 30;
 
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
@@ -206,13 +195,13 @@ function drawTravelSummaryCard(
   const statGap = 16;
   const statStartX = 540 - (4 * statW + 3 * statGap) / 2;
 
-  const distinctTransports = Array.from(new Set(legs)).map((l) => vehicleMarks[l] || "✈️");
+  const distinctTransports = Array.from(new Set(legs)).map(getVehicleName);
 
   const stats = [
     { label: "TOTAL DISTANCE", val: totalTripDistance, icon: "🌍" },
     { label: "DESTINATIONS", val: `${locations.length} Cities`, icon: "📍" },
     { label: "ROUTE LEGS", val: `${Math.max(1, locations.length - 1)} Legs`, icon: "🗺️" },
-    { label: "TRANSPORTS", val: distinctTransports.join(" ") || "✈️", icon: "🚀" },
+    { label: "TRANSPORTS", val: distinctTransports.join(" · ") || "Flight", icon: "🚀" },
   ];
 
   stats.forEach((stat, idx) => {
@@ -317,14 +306,13 @@ function drawTravelSummaryCard(
 
     if (i < locations.length - 1) {
       const legTransport = legs[i] || "flight";
-      const tEmoji = vehicleMarks[legTransport] || "✈️";
-      const tLabel = legTransport.toUpperCase();
+      const tLabel = getVehicleName(legTransport).toUpperCase();
       drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#e0f2fe", "#bae6fd", 1);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#0369a1";
       ctx.font = `800 ${badgeFontSize}px system-ui, sans-serif`;
-      const badgeText = locations.length > 12 ? `${tEmoji} ${tLabel}` : `${tEmoji} Next: ${tLabel}`;
+      const badgeText = locations.length > 12 ? tLabel : `NEXT: ${tLabel}`;
       ctx.fillText(badgeText, badgeX + badgeWidth / 2, ry + (rowH - rowPadding) / 2);
     } else {
       drawRoundedRect(ctx, badgeX, ry + (rowH - rowPadding - badgeHeight) / 2, badgeWidth, badgeHeight, 12, "#dcfce7", "#86efac", 1);
@@ -421,6 +409,12 @@ export function PreviewModal({
   const [muted, setMuted] = useState(false);
   const [unavailableVideos, setUnavailableVideos] = useState<string[]>([]);
   const [clipDurations, setClipDurations] = useState<Record<string, number>>({});
+
+  // Start loading the realistic vector vehicle assets before recording, so
+  // the first frame of every transport leg is sharp in the exported video.
+  useEffect(() => {
+    Array.from(new Set(legs)).forEach((transport) => getCachedVehicleImage(transport));
+  }, [legs]);
 
   // Use each file's intrinsic duration. A fixed duration would either cut the
   // clip short or make it play at the wrong speed.
@@ -523,11 +517,15 @@ export function PreviewModal({
     ? Math.min(activeSchedule?.photoCount! - 1, Math.floor((elapsedInLeg - VEHICLE_LEG_DURATION_MS) / PHOTO_DURATION_MS))
     : 0;
   const activePhotoUrl = activeSchedule?.images[photoIndex] || destination?.imageUrl || "";
-  // Mapbox uses equal-width leg progress. Keep it on the current route while photos are shown.
-  const mapProgress = Math.min(
-    1,
-    (currentLegIndex + (isMediaShowcase ? 0.999999 : travelProgress * 0.55)) / totalLegs
-  );
+  
+  // Continuous smooth progress across travel and arrival showcase (no sudden snap jumps)
+  const arrivalFraction = arrivalMediaDuration > 0
+    ? Math.min(1.0, (elapsedInLeg - VEHICLE_LEG_DURATION_MS) / arrivalMediaDuration)
+    : 0;
+  const legTotalProgress = !isPhotoShowcase
+    ? (travelProgress * 0.55)
+    : (0.55 + arrivalFraction * 0.44999);
+  const mapProgress = Math.min(1, (currentLegIndex + legTotalProgress) / totalLegs);
 
   const totalTripDistance = useMemo(
     () =>
@@ -555,21 +553,31 @@ export function PreviewModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, recording]);
 
-  // Regular preview playback timer (when not recording)
+  // High-precision smooth 60fps preview playback timer using requestAnimationFrame
   useEffect(() => {
     if (!playing || recording) return;
-    const intervalMs = 30;
-    const timer = window.setInterval(() => {
-      setTimelineElapsed((value) => Math.min(totalPlaybackDuration, value + intervalMs));
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [playing, totalPlaybackDuration, recording]);
+    let animFrame: number;
+    let lastTime = performance.now();
 
-  useEffect(() => {
-    if (playing && !recording && timelineElapsed >= totalPlaybackDuration) {
-      setPlaying(false);
-    }
-  }, [playing, recording, timelineElapsed, totalPlaybackDuration]);
+    const tick = (now: number) => {
+      const dt = Math.min(100, Math.max(0, now - lastTime));
+      lastTime = now;
+
+      setTimelineElapsed((prev) => {
+        const next = prev + dt;
+        if (next >= totalPlaybackDuration) {
+          setPlaying(false);
+          return totalPlaybackDuration;
+        }
+        return next;
+      });
+
+      animFrame = requestAnimationFrame(tick);
+    };
+
+    animFrame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animFrame);
+  }, [playing, totalPlaybackDuration, recording]);
 
   // Background music audio playback during preview
   useEffect(() => {
@@ -813,7 +821,6 @@ export function PreviewModal({
         const legIdx = recSchedule?.index ?? 0;
         const isArrival = recElapsedInLeg >= VEHICLE_LEG_DURATION_MS;
         const curTransport = legs[legIdx] ?? "flight";
-        const vehicleMark = vehicleMarks[curTransport] ?? "✈️";
         const arrivalStop = recSchedule?.stop || locations[locations.length - 1];
         const arrivalImages = recSchedule?.images || getLocationImages(arrivalStop);
         const totalPhotos = Math.max(1, recSchedule?.photoCount ?? arrivalImages.length);
@@ -850,32 +857,16 @@ export function PreviewModal({
           ctx.fillRect(0, 0, 1080, 1080);
         }
 
-        // 2. Draw Moving Vehicle Marker & Destination Target Pill (during journey)
+        // 2. Draw Moving Realistic Vehicle Marker & Destination Target Pill (during journey)
         if (!isArrival && elapsed >= journeyStartTime && elapsed < summaryStartTime) {
           ctx.save();
-          // Outer halo pulse
-          ctx.beginPath();
-          ctx.arc(540, 540, 38, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(56, 189, 248, 0.35)";
-          ctx.fill();
+          const travelFraction = Math.min(1.0, recElapsedInLeg / VEHICLE_LEG_DURATION_MS);
+          const startLoc = locations[legIdx] || locations[0];
+          const endLoc = locations[legIdx + 1] || locations[locations.length - 1];
+          const curLegCoords = getLegCoordinates(startLoc, endLoc, curTransport);
+          const { bearing: recBearing } = getPointAlongPolyline(curLegCoords, travelFraction);
 
-          // Dark badge background
-          ctx.beginPath();
-          ctx.arc(540, 540, 26, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(3, 16, 29, 0.94)";
-          ctx.fill();
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = "#38bdf8";
-          ctx.shadowColor = "#38bdf8";
-          ctx.shadowBlur = 14;
-          ctx.stroke();
-
-          // Vehicle icon emoji
-          ctx.shadowBlur = 0;
-          ctx.font = "26px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(vehicleMark, 540, 541);
+          drawRealisticVehicleOnCanvas(ctx, curTransport, 540, 540, recBearing, 1.2);
 
           // Destination Name Tag Pill floating above the vehicle
           const destNameText = `📍 Next: ${arrivalStop.name} (${arrivalStop.code})`;
@@ -1283,7 +1274,7 @@ export function PreviewModal({
                 <div className="summary-stat-box">
                   <span className="stat-label">🚀 TRANSPORTS</span>
                   <strong className="stat-value">
-                    {Array.from(new Set(legs)).map((l) => vehicleMarks[l] || "✈️").join(" ") || "✈️"}
+                    {Array.from(new Set(legs)).map(getVehicleName).join(" · ") || "Flight"}
                   </strong>
                 </div>
               </div>
@@ -1305,7 +1296,7 @@ export function PreviewModal({
                       </div>
                       {idx < locations.length - 1 ? (
                         <div className="summary-leg-badge">
-                          <span>{vehicleMarks[legs[idx] || "flight"]} Next: {(legs[idx] || "flight").toUpperCase()}</span>
+                          <span>Next: {getVehicleName(legs[idx] || "flight").toUpperCase()}</span>
                         </div>
                       ) : (
                         <div className="summary-leg-badge final-badge">

@@ -1,6 +1,7 @@
 import mapboxgl from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getLocationImages, type Location, type Transport } from "./types";
+import { getRealisticVehicleSvg, getVehicleMarkerContent, getVehicleRotationOffset } from "./vehicleRender";
 
 export const MAPBOX_TOKEN =
   (import.meta as {
@@ -25,7 +26,7 @@ export const MAPBOX_TOKEN =
     };
   }).env?.REACT_APP_MAPBOX_TOKEN ||
   "";
-
+  
 type Props = {
   locations: Location[];
   legs?: Transport[];
@@ -38,18 +39,6 @@ type Props = {
   showVehicle?: boolean;
 };
 
-const vehicleMarks: Record<Transport, string> = {
-  car: "🚗",
-  bike: "🏍️",
-  flight: "✈️",
-  train: "🚆",
-  taxi: "🚕",
-  bicycle: "🚲",
-  bus: "🚌",
-  walking: "🚶",
-  ship: "🚢",
-};
-
 // Fade envelope helper: ramps 0 -> 1 over the first `fadeIn` fraction of the
 // arrival showcase, then holds at 1 for the remainder. Used to smoothly fade
 // the full-screen arrival photo in as soon as the vehicle reaches a stop.
@@ -60,12 +49,12 @@ function getArrivalFadeOpacity(fraction: number, fadeIn = 0.12): number {
   return 1;
 }
 
-function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const phi1 = (lat1 * Math.PI) / 180;
   const phi2 = (lat2 * Math.PI) / 180;
   const y = Math.sin(dLng) * Math.cos(phi2);
-  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(dLng);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLng);
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
@@ -275,7 +264,7 @@ function generateNauticalSeaRoute(start: Location, end: Location, segments = 100
   return result;
 }
 
-function getLegCoordinates(
+export function getLegCoordinates(
   start: Location,
   end: Location,
   transport: Transport,
@@ -334,22 +323,41 @@ async function fetchLegRoute(start: Location, end: Location, transport: Transpor
   return fallback;
 }
 
-function getPointAlongPolyline(
+function interpolatePolylinePoint(
+  coords: [number, number][],
+  dists: number[],
+  totalDist: number,
+  targetFraction: number
+): { lat: number; lng: number } {
+  const targetDist = Math.max(0, Math.min(1, targetFraction)) * totalDist;
+  let segIdx = 0;
+  for (let i = 0; i < dists.length - 1; i++) {
+    if (targetDist >= dists[i] && targetDist <= dists[i + 1]) {
+      segIdx = i;
+      break;
+    }
+  }
+  const segStart = dists[segIdx];
+  const segEnd = dists[segIdx + 1];
+  const segFraction = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
+
+  const p1 = coords[segIdx];
+  const p2 = coords[segIdx + 1] || p1;
+
+  const lng = p1[0] + (p2[0] - p1[0]) * segFraction;
+  const lat = p1[1] + (p2[1] - p1[1]) * segFraction;
+  return { lat, lng };
+}
+
+export function getPointAlongPolyline(
   coords: [number, number][],
   fraction: number
 ): { pt: { lat: number; lng: number }; bearing: number } {
   if (!coords || coords.length === 0) {
     return { pt: { lat: 0, lng: 0 }, bearing: 0 };
   }
-  if (coords.length === 1 || fraction <= 0) {
-    const bearing = coords.length > 1 ? calculateBearing(coords[0][1], coords[0][0], coords[1][1], coords[1][0]) : 0;
-    return { pt: { lat: coords[0][1], lng: coords[0][0] }, bearing };
-  }
-  if (fraction >= 1) {
-    const last = coords[coords.length - 1];
-    const prev = coords[coords.length - 2] || last;
-    const bearing = calculateBearing(prev[1], prev[0], last[1], last[0]);
-    return { pt: { lat: last[1], lng: last[0] }, bearing };
+  if (coords.length === 1) {
+    return { pt: { lat: coords[0][1], lng: coords[0][0] }, bearing: 0 };
   }
 
   const dists: number[] = [0];
@@ -366,27 +374,20 @@ function getPointAlongPolyline(
     return { pt: { lat: coords[0][1], lng: coords[0][0] }, bearing: 0 };
   }
 
-  const targetDist = fraction * totalDist;
-  let segIdx = 0;
-  for (let i = 0; i < dists.length - 1; i++) {
-    if (targetDist >= dists[i] && targetDist <= dists[i + 1]) {
-      segIdx = i;
-      break;
-    }
+  const pt = interpolatePolylinePoint(coords, dists, totalDist, fraction);
+
+  // Smooth forward lookahead for rock-solid directional heading
+  const LOOKAHEAD = 0.02; // 2% lookahead along the route
+  let bearing = 0;
+  if (fraction < 0.98) {
+    const ptAhead = interpolatePolylinePoint(coords, dists, totalDist, Math.min(1.0, fraction + LOOKAHEAD));
+    bearing = calculateBearing(pt.lat, pt.lng, ptAhead.lat, ptAhead.lng);
+  } else {
+    const ptBehind = interpolatePolylinePoint(coords, dists, totalDist, Math.max(0.0, fraction - LOOKAHEAD));
+    bearing = calculateBearing(ptBehind.lat, ptBehind.lng, pt.lat, pt.lng);
   }
 
-  const segStart = dists[segIdx];
-  const segEnd = dists[segIdx + 1];
-  const segFraction = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
-
-  const p1 = coords[segIdx];
-  const p2 = coords[segIdx + 1] || p1;
-
-  const lng = p1[0] + (p2[0] - p1[0]) * segFraction;
-  const lat = p1[1] + (p2[1] - p1[1]) * segFraction;
-  const bearing = calculateBearing(p1[1], p1[0], p2[1], p2[0]);
-
-  return { pt: { lat, lng }, bearing };
+  return { pt, bearing };
 }
 
 function getPolylineUpTo(coords: [number, number][], fraction: number): [number, number][] {
@@ -486,7 +487,7 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
   } else if (dist >= 15) {
     return { zoom: 9.8, pitch: 50 };
   } else {
-    return { zoom: 11.8, pitch: 52 };
+    return { zoom: 11.5, pitch: 52 };
   }
 }
 
@@ -504,7 +505,10 @@ export function MapboxGlobe({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const vehicleMarkerRef = useRef<mapboxgl.Marker | null>(null);
-  const vehicleIconRef = useRef<HTMLSpanElement | null>(null);
+  const vehicleIconRef = useRef<HTMLDivElement | null>(null);
+  const lastVehicleTransportRef = useRef<Transport | null>(null);
+  const lastRouteFrameRef = useRef({ leg: -1, fraction: -1, at: 0 });
+  const lastCameraFrameRef = useRef(0);
   const stopMarkersRef = useRef<Array<{ marker: mapboxgl.Marker; badgeEl: HTMLElement; id: string }>>([]);
   const [internalProgress, setInternalProgress] = useState(0);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -546,7 +550,6 @@ export function MapboxGlobe({
 
   const {
     currentPoint,
-    currentMark,
     currentStop,
     activeLegIndex,
     legFraction,
@@ -564,7 +567,6 @@ export function MapboxGlobe({
     if (locations.length < 2) {
       return {
         currentPoint: locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : null,
-        currentMark: "✈️",
         currentStop: locations[0],
         activeLegIndex: 0,
         legFraction: 0,
@@ -588,7 +590,6 @@ export function MapboxGlobe({
     const start = locations[legIdx];
     const end = locations[legIdx + 1] || locations[locations.length - 1];
     const curTransport = legs[legIdx] ?? "flight";
-    const mark = vehicleMarks[curTransport] ?? "✈️";
 
     const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
 
@@ -606,7 +607,6 @@ export function MapboxGlobe({
 
     return {
       currentPoint: arrivalActive ? { lat: end.lat, lng: end.lng } : point,
-      currentMark: mark,
       currentStop: activeDisplayStop,
       activeLegIndex: legIdx,
       legFraction: fraction,
@@ -692,37 +692,66 @@ export function MapboxGlobe({
           },
         });
       }
+
     });
 
     if (vehicleMarkerRef.current) {
       vehicleMarkerRef.current.remove();
       vehicleMarkerRef.current = null;
       vehicleIconRef.current = null;
+      lastVehicleTransportRef.current = null;
     }
 
     const vehicleEl = document.createElement("div");
-    vehicleEl.className = "mapbox-vehicle-marker";
+    vehicleEl.className = "mapbox-realistic-vehicle-wrapper";
     vehicleEl.style.cssText = `
+      position: relative;
+      width: 56px;
+      height: 56px;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: rgba(3, 16, 29, 0.92);
-      border: 2px solid #38bdf8;
-      box-shadow: 0 0 20px rgba(56, 189, 248, 0.9), 0 8px 24px rgba(0,0,0,0.85);
       pointer-events: none;
       z-index: 100;
     `;
 
-    const iconSpan = document.createElement("span");
-    iconSpan.style.cssText = "font-size: 26px; line-height: 1; display: block; user-select: none;";
-    iconSpan.textContent = currentMark || "✈️";
-    vehicleEl.appendChild(iconSpan);
-    vehicleIconRef.current = iconSpan;
+    const vehicleShadow = document.createElement("div");
+    vehicleShadow.setAttribute("aria-hidden", "true");
+    vehicleShadow.style.cssText = `
+      position: absolute;
+      bottom: 5px;
+      width: 36px;
+      height: 11px;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.22) 48%, transparent 74%);
+      filter: blur(2px);
+      transform: translateY(4px);
+    `;
+    vehicleEl.appendChild(vehicleShadow);
 
-    const vehicleMarker = new mapboxgl.Marker({ element: vehicleEl, anchor: "center" })
+    const iconSticker = document.createElement("div");
+    iconSticker.className = "mapbox-vehicle-svg-container";
+    iconSticker.style.cssText = `
+      position: relative;
+      width: 46px;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+      will-change: transform;
+    `;
+    iconSticker.innerHTML = getRealisticVehicleSvg(transport || "flight");
+    vehicleEl.appendChild(iconSticker);
+    vehicleIconRef.current = iconSticker;
+    lastVehicleTransportRef.current = transport;
+
+    const vehicleMarker = new mapboxgl.Marker({
+      element: vehicleEl,
+      anchor: "center",
+      rotationAlignment: "viewport",
+      pitchAlignment: "viewport",
+    })
       .setLngLat(initialCenter)
       .addTo(map);
 
@@ -746,11 +775,13 @@ export function MapboxGlobe({
         vehicleMarkerRef.current.remove();
         vehicleMarkerRef.current = null;
         vehicleIconRef.current = null;
+        lastVehicleTransportRef.current = null;
       }
       stopMarkersRef.current.forEach((item) => item.marker.remove());
       stopMarkersRef.current = [];
       map.remove();
       mapRef.current = null;
+      setMapLoaded(false);
     };
   }, [mapStyle]);
 
@@ -760,6 +791,19 @@ export function MapboxGlobe({
 
     const baseSource = map.getSource("journey-route-base") as mapboxgl.GeoJSONSource | undefined;
     if (!baseSource) return;
+
+    // setData serializes GeoJSON and forces Mapbox to rebuild the line. Doing
+    // that at 60 fps competes with the moving marker, especially on globe mode.
+    const now = performance.now();
+    const last = lastRouteFrameRef.current;
+    if (
+      last.leg === activeLegIndex &&
+      Math.abs(last.fraction - pathFraction) < 0.006 &&
+      now - last.at < 50
+    ) {
+      return;
+    }
+    lastRouteFrameRef.current = { leg: activeLegIndex, fraction: pathFraction, at: now };
 
     if (locations.length < 2) {
       baseSource.setData({
@@ -838,86 +882,75 @@ export function MapboxGlobe({
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 4px 10px 4px 5px;
-        border-radius: 20px;
+        padding: 5px 10px;
+        border-radius: 16px;
         background: rgba(3, 16, 29, 0.92);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         border: 1.5px solid rgba(56, 189, 248, 0.45);
         box-shadow: 0 6px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(56, 189, 248, 0.2);
-        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
-        white-space: nowrap;
+        backdrop-filter: blur(8px);
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.2s ease, box-shadow 0.2s ease;
       `;
+
+      const numBadge = document.createElement("div");
+      numBadge.style.cssText = `
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #0284c7, #0369a1);
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 800;
+        display: grid;
+        place-items: center;
+        border: 1px solid #38bdf8;
+        flex-shrink: 0;
+      `;
+      numBadge.textContent = String(idx + 1);
+      card.appendChild(numBadge);
 
       if (loc.imageUrl) {
-        const img = document.createElement("img");
-        img.src = loc.imageUrl;
-        img.alt = loc.name;
-        img.style.cssText = `
-          width: 26px;
-          height: 26px;
-          border-radius: 50%;
-          object-fit: cover;
-          border: 1.5px solid #38bdf8;
-          flex-shrink: 0;
-          display: block;
-        `;
-        card.appendChild(img);
-      } else {
-        const numBadge = document.createElement("span");
-        numBadge.style.cssText = `
+        const thumb = document.createElement("img");
+        thumb.src = loc.imageUrl;
+        thumb.alt = loc.name;
+        thumb.style.cssText = `
           width: 24px;
           height: 24px;
-          border-radius: 50%;
-          background: #0284c7;
-          color: #ffffff;
-          font-size: 11px;
-          font-weight: 800;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 1.5px solid #38bdf8;
+          border-radius: 6px;
+          object-fit: cover;
+          border: 1px solid rgba(255, 255, 255, 0.4);
           flex-shrink: 0;
         `;
-        numBadge.textContent = `${idx + 1}`;
-        card.appendChild(numBadge);
+        card.appendChild(thumb);
       }
 
-      const labelDiv = document.createElement("div");
-      labelDiv.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      `;
+      const textBlock = document.createElement("div");
+      textBlock.style.cssText = "display: flex; flex-direction: column; line-height: 1.15;";
 
-      const nameSpan = document.createElement("span");
-      nameSpan.style.cssText = `
+      const nameEl = document.createElement("span");
+      nameEl.style.cssText = `
         font-size: 12px;
         font-weight: 700;
-        color: #ffffff;
-        font-family: Inter, system-ui, -apple-system, sans-serif;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.8);
       `;
-      nameSpan.textContent = loc.name;
-      labelDiv.appendChild(nameSpan);
+      nameEl.textContent = loc.name;
+      textBlock.appendChild(nameEl);
 
-      if (loc.code) {
-        const codeSpan = document.createElement("span");
-        codeSpan.style.cssText = `
-          font-size: 9px;
-          font-weight: 800;
-          color: #38bdf8;
-          background: rgba(56, 189, 248, 0.18);
-          border: 1px solid rgba(56, 189, 248, 0.4);
-          padding: 1px 5px;
-          border-radius: 6px;
-          letter-spacing: 0.05em;
-        `;
-        codeSpan.textContent = loc.code;
-        labelDiv.appendChild(codeSpan);
-      }
+      const codeEl = document.createElement("span");
+      codeEl.style.cssText = `
+        font-size: 9.5px;
+        font-weight: 600;
+        color: #38bdf8;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      `;
+      codeEl.textContent = loc.code || loc.country;
+      textBlock.appendChild(codeEl);
 
-      card.appendChild(labelDiv);
+      card.appendChild(textBlock);
       wrapper.appendChild(card);
 
       const needle = document.createElement("div");
@@ -1010,7 +1043,11 @@ export function MapboxGlobe({
         vMarker.getElement().style.display = showVehicle ? "flex" : "none";
       }
       if (vehicleIconRef.current) {
-        vehicleIconRef.current.textContent = "📍";
+        if (lastVehicleTransportRef.current !== transport) {
+          vehicleIconRef.current.innerHTML = getRealisticVehicleSvg(transport || "flight");
+          lastVehicleTransportRef.current = transport;
+        }
+        vehicleIconRef.current.style.transform = "rotate(0deg) scale(1)";
       }
       map.easeTo({
         center: [locations[0].lng, locations[0].lat],
@@ -1027,19 +1064,38 @@ export function MapboxGlobe({
       vMarker.setLngLat([currentPoint.lng, currentPoint.lat]);
       vMarker.getElement().style.display = showVehicle ? "flex" : "none";
     }
+
     if (vehicleIconRef.current) {
-      vehicleIconRef.current.textContent = currentMark;
+      if (lastVehicleTransportRef.current !== transport) {
+        vehicleIconRef.current.innerHTML = getRealisticVehicleSvg(transport);
+        vehicleIconRef.current.className = "mapbox-vehicle-svg-container";
+        lastVehicleTransportRef.current = transport;
+      }
+      const rotation = (bearing || 0) + getVehicleRotationOffset(transport);
+      const vehicleScale = isArrival
+        ? 0.92
+        : transport === "ship"
+        ? 1.45
+        : transport === "bus"
+        ? 1.3
+        : transport === "train"
+        ? 1.32
+        : transport === "bike" || transport === "bicycle" || transport === "walking"
+        ? 1.55
+        : 1.18;
+      const trainLength = transport === "train" ? " scaleY(1.35)" : "";
+      vehicleIconRef.current.style.transform =
+        `rotate(${rotation}deg) scale(${vehicleScale})${trainLength} perspective(160px) rotateX(24deg) rotateY(-10deg)`;
     }
 
+    // 60FPS Continuous Map Camera Tracking
     if (isArrival && currentEnd) {
       if (playing) {
-        map.easeTo({
+        map.jumpTo({
           center: [currentEnd.lng, currentEnd.lat],
           zoom: 7.0,
           pitch: 42,
           bearing: 0,
-          duration: 140,
-          easing: (t) => t,
         });
       }
     } else {
@@ -1051,17 +1107,15 @@ export function MapboxGlobe({
       );
 
       if (playing) {
-        map.easeTo({
+        map.jumpTo({
           center: [currentPoint.lng, currentPoint.lat],
           zoom: targetZoom,
           pitch: targetPitch,
           bearing: 0,
-          duration: 120,
-          easing: (t) => t,
         });
       }
     }
-  }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations, showVehicle]);
+  }, [currentPoint, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations, showVehicle, bearing]);
 
   useEffect(() => {
     if (!playing || externalProgress !== undefined) return;

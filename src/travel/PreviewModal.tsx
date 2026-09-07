@@ -31,8 +31,30 @@ const OUTRO_DURATION_MS = 2500;
 const FADE_TRANSITION_MS = 500;
 const VEHICLE_LEG_DURATION_MS = 4000;
 const PHOTO_DURATION_MS = 2000;
-const ROUTE_MAP_DURATION_MS = 3200; // 2D route overview stage, shown right before the summary
+const ROUTE_MAP_DURATION_MS = 3200;
+const COLLAGE_DURATION_MS = 6000;
+const COLLAGE_ENTRY_DURATION_MS = 3200;
+const COLLAGE_STAGGER_MS = 120;
 const EXPORT_FRAME_RATE = 30;
+
+const COLLAGE_ENTRY_VECTORS = [
+  { x: -780, y: -640, rotate: -14 },
+  { x: 0, y: -760, rotate: -8 },
+  { x: 780, y: -640, rotate: 14 },
+  { x: 860, y: 0, rotate: 10 },
+  { x: 780, y: 640, rotate: -12 },
+  { x: 0, y: 760, rotate: 8 },
+  { x: -780, y: 640, rotate: 12 },
+  { x: -860, y: 0, rotate: -10 },
+] as const;
+
+function getCollageColumns(imageCount: number) {
+  if (imageCount <= 1) return 1;
+  if (imageCount <= 4) return 2;
+  if (imageCount <= 8) return 4;
+  if (imageCount <= 12) return 4;
+  return 5;
+}
 
 const audioBufferCache = new Map<string, Promise<AudioBuffer>>();
 
@@ -154,7 +176,7 @@ function drawBrandingCard(
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#0f2d5c";
   ctx.font = "800 18px system-ui, sans-serif";
-  ctx.fillText("ROAMLY STUDIO", 540, 680);
+  ctx.fillText("BEFORE WE DIE", 540, 680);
   ctx.fillStyle = "#102a4f";
   ctx.font = "700 36px Georgia, serif";
   ctx.fillText(title, 540, 735);
@@ -192,17 +214,14 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
   ctx.save();
   ctx.globalAlpha = opacity;
 
-  // Dark background overlay
   ctx.fillStyle = "rgba(2, 12, 27, 0.94)";
   ctx.fillRect(0, 0, 1080, 1080);
 
-  // Main container card
   ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
   ctx.shadowBlur = 36;
   drawRoundedRect(ctx, 60, 50, 960, 980, 32, "#ffffff");
   ctx.shadowBlur = 0;
 
-  // Header Title
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#0284c7";
@@ -219,7 +238,6 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
   ctx.font = "600 14px system-ui, sans-serif";
   ctx.fillText("Complete journey overview & route statistics", 540, 172);
 
-  // 4 Key Statistics Cards in a grid row
   const statBoxY = 196;
   const statW = 205;
   const statH = 82;
@@ -248,7 +266,6 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
     ctx.fillText(stat.val, sx + statW / 2, statBoxY + 54);
   });
 
-  // Stops list container with smooth auto-scroll window
   const stopsListY = 296;
   const stopsListH = 710;
   const headerH = 46;
@@ -263,7 +280,6 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
   ctx.font = "800 14px system-ui, sans-serif";
   ctx.fillText(`📍 ALL ${locations.length} DESTINATIONS & CONNECTING ROUTES`, 120, stopsListY + 24);
 
-  // Row dimensions
   const rowH = 68;
   const rowPadding = 8;
   const totalContentH = locations.length * rowH;
@@ -272,7 +288,6 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
   const easeProgress = 0.5 - 0.5 * Math.cos(Math.PI * scrollProgress);
   const scrollY = easeProgress * maxScroll;
 
-  // Clip viewport to the stops box so nothing ever overflows
   ctx.save();
   ctx.beginPath();
   ctx.rect(90, clipY, 900, clipH);
@@ -297,7 +312,6 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
       1.5
     );
 
-    // Stop number badge
     const circleSize = 30;
     const circleX = 130;
     const circleY = ry + (rowH - rowPadding - circleSize) / 2;
@@ -309,13 +323,11 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
     ctx.font = "800 13px system-ui, sans-serif";
     ctx.fillText(`${i + 1}`, circleX + 15, circleY + 15);
 
-    // Stop thumbnail image
     const img = preloadedImgs.get(loc.imageUrl || "");
     if (img) {
       drawRoundedImage(ctx, img, 172, ry + (rowH - rowPadding - 44) / 2, 54, 44, 8);
     }
 
-    // Stop Name & Country
     const textStartX = img ? 236 : 178;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -327,7 +339,6 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
     ctx.font = "600 12px system-ui, sans-serif";
     ctx.fillText(`${loc.country} · ${loc.code}`, textStartX, ry + 32);
 
-    // Connecting Transport or Arrival badge
     const badgeW = 160;
     const badgeH = 28;
     const badgeX = 965 - 115 - badgeW;
@@ -355,16 +366,13 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
 
   ctx.restore();
 
-  // Smooth top and bottom gradient fades on the scroll container
   if (maxScroll > 0) {
-    // Top fade
     const topGrad = ctx.createLinearGradient(0, clipY, 0, clipY + 28);
     topGrad.addColorStop(0, "rgba(248, 250, 252, 0.96)");
     topGrad.addColorStop(1, "rgba(248, 250, 252, 0)");
     ctx.fillStyle = topGrad;
     ctx.fillRect(90, clipY, 900, 28);
 
-    // Bottom fade
     const btmGrad = ctx.createLinearGradient(0, clipY + clipH - 32, 0, clipY + clipH);
     btmGrad.addColorStop(0, "rgba(248, 250, 252, 0)");
     btmGrad.addColorStop(1, "rgba(248, 250, 252, 0.96)");
@@ -375,13 +383,193 @@ function drawTravelSummaryCard(options: SummaryCardOptions) {
   ctx.restore();
 }
 
-// Full 2D route overview frame for the HD export: the live tiles are
-// captured straight from the flat RouteOverviewMap's own <canvas>
-// (mapboxgl handles all map rendering/alignment itself), and the start/
-// finish flags + name pills are positioned using that same map's own
-// map.project([lng, lat]) pixel coordinates — so they always land exactly
-// on top of the correct spot on the captured tiles, with zero manual
-// coordinate math.
+// Updated drawPhotoCollage function with proper parameters
+function drawPhotoCollage(
+  ctx: CanvasRenderingContext2D,
+  images: HTMLImageElement[],
+  locationNames: string[],
+  opacity: number,
+  elapsedInCollage: number,
+  collageDuration: number,
+  totalBatches: number,
+  currentBatchIndex: number,
+  batchTransitionProgress: number,
+  totalLocations: number
+) {
+  if (opacity <= 0.001 || images.length === 0) return;
+  
+  const startIdx = 0;
+  const endIdx = images.length;
+  const batchImages = images;
+  const batchNames = locationNames;
+  
+  if (batchImages.length === 0) return;
+  
+  const totalImages = batchImages.length;
+  const padding = 54;
+  const gap = 12;
+  const headerHeight = 158;
+  const footerHeight = 60;
+  const gridWidth = 1080 - padding * 2;
+  const gridHeight = 1080 - padding * 2 - headerHeight - footerHeight;
+  const columns = getCollageColumns(totalImages);
+  const gridRows = Math.ceil(totalImages / columns);
+  const cell = Math.min(
+    (gridWidth - gap * (columns - 1)) / columns,
+    (gridHeight - gap * (gridRows - 1)) / gridRows
+  );
+  const gridContentWidth = cell * columns + gap * (columns - 1);
+  const gridContentHeight = cell * gridRows + gap * (gridRows - 1);
+  const gridStartX = padding + (gridWidth - gridContentWidth) / 2;
+  const gridStartY = padding + headerHeight + (gridHeight - gridContentHeight) / 2;
+  
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  
+  // Background and a restrained colour wash for depth.
+  ctx.fillStyle = "#07131f";
+  ctx.fillRect(0, 0, 1080, 1080);
+  const wash = ctx.createRadialGradient(950, 30, 0, 950, 30, 900);
+  wash.addColorStop(0, "rgba(22, 97, 127, 0.32)");
+  wash.addColorStop(1, "rgba(7, 19, 31, 0)");
+  ctx.fillStyle = wash;
+  ctx.fillRect(0, 0, 1080, 1080);
+  
+  // Header
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#38bdf8";
+  ctx.font = "700 14px system-ui, sans-serif";
+  ctx.fillText("📸 JOURNEY PHOTO COLLAGE", 540, 20);
+  
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 34px Georgia, serif";
+  const headerText = totalBatches > 1 ? `Moments ${startIdx + 1}–${endIdx}` : "The moments in between";
+  ctx.fillText(headerText, 540, 44);
+  
+  // Subtitle
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "500 13px system-ui, sans-serif";
+  const subtitleText = totalBatches > 1 
+    ? `Showing ${startIdx + 1}-${Math.min(endIdx, images.length)} of ${images.length} memories`
+    : `${images.length} memories captured · ${totalLocations} destinations`;
+  ctx.fillText(subtitleText, 540, 72);
+  
+  // Batch indicator dots
+  if (totalBatches > 1) {
+    const dotSize = 8;
+    const dotGap = 12;
+    const totalDotsWidth = totalBatches * (dotSize + dotGap) - dotGap;
+    const dotsStartX = 540 - totalDotsWidth / 2;
+    const dotsY = 96;
+    
+    for (let i = 0; i < totalBatches; i++) {
+      const isActive = i === currentBatchIndex;
+      const dotX = dotsStartX + i * (dotSize + dotGap);
+      ctx.beginPath();
+      ctx.arc(dotX, dotsY, isActive ? dotSize : dotSize * 0.6, 0, Math.PI * 2);
+      ctx.fillStyle = isActive ? "#38bdf8" : "rgba(56, 189, 248, 0.3)";
+      ctx.fill();
+      if (isActive) {
+        ctx.shadowColor = "#38bdf8";
+        ctx.shadowBlur = 12;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+  
+  // Draw images with proper spacing
+  const transitionProgress = batchTransitionProgress;
+  
+  batchImages.forEach((img, idx) => {
+    if (idx >= totalImages) return;
+    
+    const col = idx % columns;
+    const row = Math.floor(idx / columns);
+    const finalWidth = cell;
+    const finalHeight = cell;
+    const x = gridStartX + col * (cell + gap);
+    const y = gridStartY + row * (cell + gap);
+    
+    // Staggered animation
+    const staggerDelay = idx * COLLAGE_STAGGER_MS;
+    const progress = Math.max(0, Math.min(1, (elapsedInCollage - staggerDelay) / COLLAGE_ENTRY_DURATION_MS));
+    const entry = COLLAGE_ENTRY_VECTORS[idx % COLLAGE_ENTRY_VECTORS.length];
+    const scale = 0.72 + 0.28 * progress;
+    const alpha = progress;
+    
+    if (alpha <= 0) return;
+    
+    ctx.save();
+    
+    // Apply batch transition effects
+    let finalAlpha = opacity * alpha;
+    let finalScale = scale;
+    
+    if (transitionProgress > 0 && transitionProgress < 1) {
+      if (transitionProgress < 0.5) {
+        finalAlpha = finalAlpha * (1 - transitionProgress * 2);
+      } else {
+        finalAlpha = finalAlpha * ((transitionProgress - 0.5) * 2);
+        finalScale = scale * (0.8 + 0.2 * ((transitionProgress - 0.5) * 2));
+      }
+    }
+    
+    if (finalAlpha <= 0) {
+      ctx.restore();
+      return;
+    }
+    
+    ctx.globalAlpha = finalAlpha;
+    
+    // Calculate position with scaling
+    const scaledW = finalWidth * finalScale;
+    const scaledH = finalHeight * finalScale;
+    const offsetX = (finalWidth - scaledW) / 2;
+    const offsetY = (finalHeight - scaledH) / 2;
+    const drawX = x + offsetX + entry.x * (1 - progress);
+    const drawY = y + offsetY + entry.y * (1 - progress);
+    
+    // Shadow
+    ctx.shadowColor = "rgba(0, 0, 0, 0.48)";
+    ctx.shadowBlur = 18;
+    
+    // Draw rounded image
+    drawRoundedImage(ctx, img, drawX, drawY, scaledW, scaledH, 16);
+    
+    // Location label
+    if (batchNames[idx]) {
+      ctx.shadowBlur = 0;
+      const labelHeight = 36;
+      const labelY = drawY + scaledH - labelHeight;
+      const gradient = ctx.createLinearGradient(0, labelY - 16, 0, labelY + labelHeight + 4);
+      gradient.addColorStop(0, "rgba(0,0,0,0)");
+      gradient.addColorStop(1, "rgba(0,0,0,0.75)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(drawX, labelY - 16, scaledW, labelHeight + 20);
+      
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "left";
+      ctx.font = "700 12px system-ui, sans-serif";
+      ctx.fillText(batchNames[idx] || "", drawX + 16, drawY + scaledH - 12);
+    }
+    
+    ctx.restore();
+  });
+  
+  // Bottom gradient fade
+  const btmGrad = ctx.createLinearGradient(0, 1040, 0, 1080);
+  btmGrad.addColorStop(0, "rgba(2, 12, 27, 0)");
+  btmGrad.addColorStop(1, "rgba(2, 12, 27, 0.9)");
+  ctx.fillStyle = btmGrad;
+  ctx.fillRect(0, 1040, 1080, 40);
+  
+  ctx.restore();
+}
+
 function drawRouteOverviewFrame(options: {
   ctx: CanvasRenderingContext2D;
   routeCanvas: HTMLCanvasElement | null;
@@ -397,7 +585,6 @@ function drawRouteOverviewFrame(options: {
     ctx.save();
     ctx.globalAlpha = opacity;
 
-    // Full-screen live map tiles, no card/border
     if (routeCanvas && routeCanvas.width > 0 && routeCanvas.height > 0) {
       ctx.drawImage(routeCanvas, 0, 0, 1080, 1080);
     } else {
@@ -405,7 +592,6 @@ function drawRouteOverviewFrame(options: {
       ctx.fillRect(0, 0, 1080, 1080);
     }
 
-    // Top gradient + header
     const topGrad = ctx.createLinearGradient(0, 0, 0, 160);
     topGrad.addColorStop(0, "rgba(0,0,0,0.65)");
     topGrad.addColorStop(1, "rgba(0,0,0,0)");
@@ -426,7 +612,6 @@ function drawRouteOverviewFrame(options: {
     ctx.font = "600 14px system-ui, sans-serif";
     ctx.fillText(`Complete 2D route map · ${totalTripDistance} travelled`, 540, 110);
 
-    // Flags + numbered stops via map.project() — no manual coordinate math
     if (routeMap) {
       const canvasEl = routeMap.getCanvas();
       const clientW = canvasEl?.clientWidth || canvasEl?.width || 1;
@@ -475,7 +660,6 @@ function drawRouteOverviewFrame(options: {
       });
     }
 
-    // Bottom gradient + start/finish
     const btmGrad = ctx.createLinearGradient(0, 940, 0, 1080);
     btmGrad.addColorStop(0, "rgba(0,0,0,0)");
     btmGrad.addColorStop(1, "rgba(0,0,0,0.65)");
@@ -496,7 +680,6 @@ function drawRouteOverviewFrame(options: {
   }
 }
 
-// Preload images into memory for smooth video generation
 async function preloadImages(urls: string[]): Promise<Map<string, HTMLImageElement>> {
   const map = new Map<string, HTMLImageElement>();
   await Promise.all(
@@ -521,8 +704,6 @@ async function preloadImages(urls: string[]): Promise<Map<string, HTMLImageEleme
   return map;
 }
 
-// The export canvas can only draw media that has finished loading. Wikimedia
-// serves these clips with CORS headers, so the rendered download stays usable.
 async function preloadVideos(urls: string[]): Promise<Map<string, HTMLVideoElement>> {
   const videos = new Map<string, HTMLVideoElement>();
   await Promise.all(
@@ -547,7 +728,6 @@ async function preloadVideos(urls: string[]): Promise<Map<string, HTMLVideoEleme
   return videos;
 }
 
-// Helper to format seconds as M:SS (e.g. 0:45, 2:00, 3:30)
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -580,8 +760,25 @@ export function PreviewModal({
   const [unavailableVideos, setUnavailableVideos] = useState<string[]>([]);
   const [clipDurations, setClipDurations] = useState<Record<string, number>>({});
 
-  // Use each file's intrinsic duration. A fixed duration would either cut the
-  // clip short or make it play at the wrong speed.
+  // Collect all unique photos from all locations
+  const allPhotos = useMemo(() => {
+    const photoMap = new Map<string, { url: string; locationName: string }>();
+    locations.forEach((loc) => {
+      const images = getLocationImages(loc);
+      if (loc.imageUrl) {
+        photoMap.set(loc.imageUrl, { url: loc.imageUrl, locationName: loc.name });
+      }
+      images.forEach((img) => {
+        photoMap.set(img, { url: img, locationName: loc.name });
+      });
+    });
+    return Array.from(photoMap.values());
+  }, [locations]);
+
+  // Keep the entire trip together in one final memory wall.
+  const totalBatches = allPhotos.length > 0 ? 1 : 0;
+  const COLLAGE_TOTAL_DURATION = allPhotos.length > 0 ? COLLAGE_DURATION_MS : 0;
+
   useEffect(() => {
     const clips = locations
       .map(getLocationVideo)
@@ -632,33 +829,36 @@ export function PreviewModal({
   );
   const totalJourneyDuration = legSchedule.reduce((total, leg) => total + leg.duration, 0);
   const totalPlaybackDuration =
-    INTRO_DURATION_MS + totalJourneyDuration + ROUTE_MAP_DURATION_MS + SUMMARY_DURATION_MS + OUTRO_DURATION_MS;
+    INTRO_DURATION_MS + totalJourneyDuration + ROUTE_MAP_DURATION_MS + SUMMARY_DURATION_MS + COLLAGE_TOTAL_DURATION + OUTRO_DURATION_MS;
   const effectiveDurationSec = totalPlaybackDuration / 1000;
 
-  // Timestamps
   const journeyStartTime = INTRO_DURATION_MS;
   const routeMapStartTime = journeyStartTime + totalJourneyDuration;
   const summaryStartTime = routeMapStartTime + ROUTE_MAP_DURATION_MS;
-  const outroStartTime = summaryStartTime + SUMMARY_DURATION_MS;
+  const collageStartTime = summaryStartTime + SUMMARY_DURATION_MS;
+  const outroStartTime = collageStartTime + COLLAGE_TOTAL_DURATION;
 
-  // Active Phase Checks
   const isIntro = timelineElapsed < journeyStartTime;
   const isJourney = timelineElapsed >= journeyStartTime && timelineElapsed < routeMapStartTime;
   const isRouteMap = timelineElapsed >= routeMapStartTime && timelineElapsed < summaryStartTime;
-  const isSummary = timelineElapsed >= summaryStartTime && timelineElapsed < outroStartTime;
+  const isSummary = timelineElapsed >= summaryStartTime && timelineElapsed < collageStartTime;
+  const isCollage = timelineElapsed >= collageStartTime && timelineElapsed < outroStartTime;
   const isOutro = timelineElapsed >= outroStartTime;
 
-  // Smooth Opacity Envelopes (Fade In & Fade Out)
+  // The single collage is held on screen as one complete set of memories.
+  const collageElapsed = Math.max(0, timelineElapsed - collageStartTime);
+  const currentBatchIndex = 0;
+  const batchTransitionProgress = 0;
+
   const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS) : 0;
   const routeMapOpacity = isRouteMap ? getFadeOpacity(timelineElapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS) : 0;
   const summaryOpacity = isSummary ? getFadeOpacity(timelineElapsed - summaryStartTime, SUMMARY_DURATION_MS) : 0;
+  const collageOpacity = isCollage ? getFadeOpacity(collageElapsed, COLLAGE_TOTAL_DURATION) : 0;
   const outroOpacity = isOutro ? getFadeOpacity(timelineElapsed - outroStartTime, OUTRO_DURATION_MS) : 0;
 
-  // Journey internal progress [0 to 100]
   const journeyElapsed = Math.min(totalJourneyDuration, Math.max(0, timelineElapsed - journeyStartTime));
   const internalProgress = totalJourneyDuration > 0 ? (journeyElapsed / totalJourneyDuration) * 100 : 0;
 
-  // Work through the itinerary in fixed stages: 4s moving, then 2s per photo.
   let scheduleOffset = 0;
   let activeSchedule = legSchedule.at(-1);
   let elapsedInLeg = 0;
@@ -688,7 +888,6 @@ export function PreviewModal({
     ? Math.min(Math.max(0, (activeSchedule?.photoCount ?? 1) - 1), Math.floor(photoElapsedInLeg / PHOTO_DURATION_MS))
     : 0;
   const activePhotoUrl = activeSchedule?.images[photoIndex] || destination?.imageUrl || "";
-  // Mapbox uses equal-width leg progress. Keep it on the current route while photos are shown.
   const mapProgress = Math.min(
     1,
     (currentLegIndex + (isMediaShowcase ? 0.999999 : travelProgress * 0.55)) / totalLegs
@@ -706,10 +905,8 @@ export function PreviewModal({
   );
 
   const elapsedSec = Math.min(effectiveDurationSec, Math.floor((internalProgress / 100) * effectiveDurationSec));
-
   const journeyIsPlaying = playing && isJourney;
 
-  // Close on Escape key press
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !recording) {
@@ -720,7 +917,6 @@ export function PreviewModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, recording]);
 
-  // Regular preview playback timer (when not recording)
   useEffect(() => {
     if (!playing || recording) return;
     const intervalMs = 30;
@@ -736,7 +932,6 @@ export function PreviewModal({
     }
   }, [playing, recording, timelineElapsed, totalPlaybackDuration]);
 
-  // Background music audio playback during preview with smooth ducking
   useEffect(() => {
     if (recording) return;
 
@@ -774,9 +969,6 @@ export function PreviewModal({
     };
   }, []);
 
-  // Keep the destination clip in sync with the preview controls. `autoPlay` is
-  // not enough after a pause/restart, and browsers only allow unmuted playback
-  // after a user interaction.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -813,7 +1005,6 @@ export function PreviewModal({
 
   const fullscreen = () => frame.current?.requestFullscreen?.().catch(() => undefined);
 
-  // Synchronized HD Video Generator & Downloader with Intro, Journey, Route Map, Summary & Outro
   const startDownloadRecording = async () => {
     if (locations.length < 2 || recording) return;
 
@@ -828,7 +1019,6 @@ export function PreviewModal({
       return;
     }
 
-    // 1. Preload all destination landmark photos into memory
     const allPhotoUrls = [
       ...locations.flatMap((loc) => [loc.imageUrl || "", ...getLocationImages(loc)]),
       BRAND_LOGO_URL,
@@ -845,7 +1035,6 @@ export function PreviewModal({
     setPlaying(false);
     audioRef.current?.pause();
 
-    // 2. Prepare 1080x1080 composite canvas
     const canvas = document.createElement("canvas");
     canvas.width = 1080;
     canvas.height = 1080;
@@ -858,16 +1047,12 @@ export function PreviewModal({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
-    // A 30fps composition is smooth for the travel movement and lets the
-    // browser encode every frame reliably (instead of dropping 1080p frames).
     const canvasStream = canvas.captureStream(EXPORT_FRAME_RATE);
     const audioContext = new AudioContext();
     const audioDestination = audioContext.createMediaStreamDestination();
     let audioStartTime = 0;
     await audioContext.resume();
 
-    // Mix the export on one Web Audio timeline. Background music occupies only
-    // Calculate all arrival showcase windows across all legs
     const arrivalWindows: { start: number; end: number; hasVideo: boolean; videoUrl?: string }[] = [];
     legSchedule.forEach((schedule, index) => {
       const legStart = INTRO_DURATION_MS + legSchedule.slice(0, index).reduce((sum, leg) => sum + leg.duration, 0);
@@ -886,8 +1071,6 @@ export function PreviewModal({
         Boolean(w.hasVideo && w.videoUrl)
     );
 
-    // Decoding is completed before the common clock is selected. Without this,
-    // a large video can make its audio start late in the exported file.
     const audioBuffers = new Map<string, AudioBuffer>();
     await Promise.all(
       [BACKGROUND_MUSIC_URL, ...videoWindows.map((window) => window.videoUrl)].map(async (url) => {
@@ -956,7 +1139,6 @@ export function PreviewModal({
 
     recorder.start();
 
-    // 3. Record Intro, Journey, Route Overview, Travel Summary, and Outro
     const length = totalPlaybackDuration;
     const started = performance.now();
     const frameInterval = 1000 / EXPORT_FRAME_RATE;
@@ -972,7 +1154,6 @@ export function PreviewModal({
         }
         lastRenderedAt = now;
 
-        // Drive player state frame-by-frame
         setTimelineElapsed(Math.min(elapsed, length));
         setRecordProgress(Math.min(100, Math.round((elapsed / length) * 100)));
 
@@ -1021,7 +1202,10 @@ export function PreviewModal({
           : 0;
         const curSec = Math.floor(elapsed / 1000);
 
-        // 1. Draw Live Mapbox 3D Globe WebGL Canvas Frame
+        const recCollageElapsed = Math.max(0, elapsed - collageStartTime);
+        const recCurrentBatchIndex = 0;
+        const recBatchTransitionProgress = 0;
+
         const activeMap = frame.current?.querySelector<HTMLCanvasElement>(".mapboxgl-canvas") || mapCanvas;
         if (activeMap && activeMap.width > 0 && activeMap.height > 0) {
           ctx.drawImage(activeMap, 0, 0, 1080, 1080);
@@ -1030,16 +1214,13 @@ export function PreviewModal({
           ctx.fillRect(0, 0, 1080, 1080);
         }
 
-        // 2. Draw Moving Vehicle Marker & Destination Target Pill (during journey)
         if (!isArrival && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           ctx.save();
-          // Outer halo pulse
           ctx.beginPath();
           ctx.arc(540, 540, 38, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(56, 189, 248, 0.35)";
           ctx.fill();
 
-          // Dark badge background
           ctx.beginPath();
           ctx.arc(540, 540, 26, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(3, 16, 29, 0.94)";
@@ -1050,14 +1231,12 @@ export function PreviewModal({
           ctx.shadowBlur = 14;
           ctx.stroke();
 
-          // Vehicle icon emoji
           ctx.shadowBlur = 0;
           ctx.font = "26px sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(vehicleMark, 540, 541);
 
-          // Destination Name Tag Pill floating above the vehicle
           const destNameText = `📍 Next: ${arrivalStop.name} (${arrivalStop.code})`;
           ctx.font = "700 15px system-ui, -apple-system, sans-serif";
           const textWidth = ctx.measureText(destNameText).width;
@@ -1082,7 +1261,6 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 3. Top-Left Active Status Banner (during journey)
         if (elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           drawRoundedRect(ctx, 40, 40, 460, 110, 22, "rgba(3, 16, 29, 0.95)", "rgba(56, 189, 248, 0.75)", 2);
 
@@ -1117,13 +1295,11 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 4. Full-screen Arrival Media (photo or video) with snappy spring pop entrance
         if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           ctx.save();
           ctx.globalAlpha = recArrivalOpacity;
 
           if (recVideo && exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            // Destination video with snappy spring pop entrance
             const popMs = 400;
             const t = Math.min(1, Math.max(0, recArrivalElapsed / popMs));
             const c1 = 1.35;
@@ -1138,7 +1314,6 @@ export function PreviewModal({
             const activeImg = preloadedImgs.get(activePhotoUrl);
             const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
 
-            // Snappy spring overshoot scaling (0.35 -> 1.04 -> 1.00)
             const popMs = 400;
             const t = Math.min(1, Math.max(0, photoElapsed / popMs));
             const c1 = 1.35;
@@ -1149,7 +1324,6 @@ export function PreviewModal({
             const dw = 1080 * scale, dh = 1080 * scale;
             const dx = (1080 - dw) / 2, dy = (1080 - dh) / 2;
 
-            // Draw previous image underneath during the jump to prevent any black background glitch
             if (photoIdx > 0 && photoElapsed < popMs) {
               const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
               const prevImg = preloadedImgs.get(prevPhotoUrl);
@@ -1173,7 +1347,6 @@ export function PreviewModal({
               ctx.fillRect(0, 0, 1080, 1080);
             }
 
-            // Micro shutter flash on each photo jump (first 100ms)
             if (photoElapsed < 100) {
               const flashAlpha = (1 - photoElapsed / 100) * 0.35;
               ctx.save();
@@ -1183,7 +1356,6 @@ export function PreviewModal({
             }
           }
 
-          // Soft bottom gradient so the caption stays readable over any photo/video
           const gradient = ctx.createLinearGradient(0, 800, 0, 1080);
           gradient.addColorStop(0, "rgba(3, 16, 29, 0)");
           gradient.addColorStop(1, "rgba(3, 16, 29, 0.88)");
@@ -1216,7 +1388,6 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 5. Bottom Cinematic Movie Bar (during journey)
         if (elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
           ctx.save();
           ctx.textAlign = "center";
@@ -1240,7 +1411,6 @@ export function PreviewModal({
           );
           ctx.shadowBlur = 0;
 
-          // Bottom Progress Bar
           ctx.fillStyle = "rgba(255,255,255,0.2)";
           ctx.fillRect(60, 1052, 960, 4);
           ctx.fillStyle = "#38bdf8";
@@ -1248,7 +1418,6 @@ export function PreviewModal({
           ctx.restore();
         }
 
-        // 6. Smooth Intro Card (Fade In & Fade Out)
         if (elapsed < INTRO_DURATION_MS) {
           const introFade = getFadeOpacity(elapsed, INTRO_DURATION_MS);
           drawBrandingCard(
@@ -1260,10 +1429,6 @@ export function PreviewModal({
           );
         }
 
-        // 6.5 Full 2D Route Overview Map (Fade In & Fade Out), right before the summary.
-        // Captured live from the flat RouteOverviewMap's own Mapbox canvas, with
-        // flags/markers positioned via that same map's project() — no static
-        // world-map image or manual crop-math involved anymore.
         if (elapsed >= routeMapStartTime && elapsed < summaryStartTime) {
           const routeFade = getFadeOpacity(elapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS);
           const routeMap = routeOverviewRef.current?.getMap() ?? null;
@@ -1279,8 +1444,7 @@ export function PreviewModal({
           });
         }
 
-        // 7. Travel Summary Card Before Outro (Fade In & Fade Out)
-        if (elapsed >= summaryStartTime && elapsed < outroStartTime) {
+        if (elapsed >= summaryStartTime && elapsed < collageStartTime) {
           const sumFade = getFadeOpacity(elapsed - summaryStartTime, SUMMARY_DURATION_MS);
           drawTravelSummaryCard({
             ctx,
@@ -1294,7 +1458,36 @@ export function PreviewModal({
           });
         }
 
-        // 8. Smooth Outro Card (Fade In & Fade Out)
+        // Photo Collage with batching - FIXED with totalLocations parameter
+        if (elapsed >= collageStartTime && elapsed < outroStartTime) {
+          const collageElapsed = elapsed - collageStartTime;
+          const collageFade = getFadeOpacity(collageElapsed, COLLAGE_TOTAL_DURATION);
+          
+          const collageImages: HTMLImageElement[] = [];
+          const collageNames: string[] = [];
+          
+          allPhotos.forEach(({ url, locationName }) => {
+            const img = preloadedImgs.get(url);
+            if (img) {
+              collageImages.push(img);
+              collageNames.push(locationName);
+            }
+          });
+          
+          drawPhotoCollage(
+            ctx,
+            collageImages,
+            collageNames,
+            collageFade,
+            collageElapsed,
+            COLLAGE_DURATION_MS,
+            totalBatches,
+            recCurrentBatchIndex,
+            recBatchTransitionProgress,
+            locations.length // This was missing - now fixed
+          );
+        }
+
         if (elapsed >= outroStartTime) {
           const outroFade = getFadeOpacity(elapsed - outroStartTime, OUTRO_DURATION_MS);
           drawBrandingCard(
@@ -1331,8 +1524,7 @@ export function PreviewModal({
     const endName = locations[locations.length - 1]?.name
       ? locations[locations.length - 1].name.toLowerCase().replace(/\s+/g, "-")
       : "end";
-    link.download = `roamly-${startName}-to-${endName}-1080p-journey.${mime.startsWith("video/mp4") ? "mp4" : "webm"
-      }`;
+    link.download = `before-we-die-${startName}-to-${endName}-1080p-journey.${mime.startsWith("video/mp4") ? "mp4" : "webm"}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1342,7 +1534,6 @@ export function PreviewModal({
     setPlaying(false);
   };
 
-  // Auto-record if triggered from main page
   useEffect(() => {
     if (autoRecord && !recording) {
       const timer = window.setTimeout(() => {
@@ -1372,7 +1563,6 @@ export function PreviewModal({
           </button>
         )}
 
-        {/* Live Recording Status Badge */}
         {recording && (
           <div
             style={{
@@ -1409,17 +1599,19 @@ export function PreviewModal({
           </div>
         )}
 
-        <MapboxGlobe
-          key={restartKey}
-          locations={locations}
-          legs={legs}
-          progress={mapProgress}
-          activeLocation={destination}
-          playing={journeyIsPlaying || recording}
-          className="map-video-globe"
-          hideOverlays
-          showVehicle={!isMediaShowcase}
-        />
+        {!isCollage && (
+          <MapboxGlobe
+            key={restartKey}
+            locations={locations}
+            legs={legs}
+            progress={mapProgress}
+            activeLocation={destination}
+            playing={journeyIsPlaying || recording}
+            className="map-video-globe"
+            hideOverlays
+            showVehicle={!isMediaShowcase}
+          />
+        )}
 
         {isJourney && isPhotoShowcase && !isVideoShowcase && (
           <section
@@ -1512,7 +1704,6 @@ export function PreviewModal({
           </section>
         )}
 
-        {/* Intro Branding Card with Smooth Fade In & Fade Out */}
         {isIntro && (
           <div
             className="video-branding-card"
@@ -1521,14 +1712,13 @@ export function PreviewModal({
           >
             <div className="video-branding-content">
               <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
-              <span>ROAMLY STUDIO</span>
+              <span>Before We Die</span>
               <strong>Your journey starts here</strong>
               <small>{`${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`}</small>
             </div>
           </div>
         )}
 
-        {/* 2D Route Overview Map — full-screen flat Mapbox instance with floating overlays */}
         <div
           className="video-summary-card"
           style={{
@@ -1543,12 +1733,10 @@ export function PreviewModal({
           aria-live="polite"
           aria-hidden={!isRouteMap}
         >
-          {/* Map fills entire screen */}
           <div style={{ position: "absolute", inset: 0 }}>
             <RouteOverviewMap ref={routeOverviewRef} locations={locations} />
           </div>
 
-          {/* Header overlay, top floating */}
           <div
             style={{
               position: "absolute",
@@ -1595,7 +1783,6 @@ export function PreviewModal({
             </p>
           </div>
 
-          {/* Start/Finish overlay, bottom floating */}
           <div
             style={{
               position: "absolute",
@@ -1623,7 +1810,6 @@ export function PreviewModal({
           </div>
         </div>
 
-        {/* Travel Summary Card (Before Outro) with Smooth Fade In & Fade Out */}
         {isSummary && (
           <div
             className="video-summary-card"
@@ -1692,7 +1878,173 @@ export function PreviewModal({
           </div>
         )}
 
-        {/* Outro Branding Card with Smooth Fade In & Fade Out */}
+        {/* Photo Collage Section with Batching */}
+        {isCollage && (
+          <div
+            className="video-collage-card"
+            style={{ 
+              opacity: collageOpacity, 
+              transition: "opacity 0.05s linear",
+              position: "absolute",
+              inset: 0,
+              zIndex: 20,
+              background: "rgba(2, 12, 27, 0.95)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "32px",
+              overflow: "hidden"
+            }}
+            aria-live="polite"
+          >
+            <div className="collage-header" style={{ 
+              width: "100%", 
+              maxWidth: "900px",
+              textAlign: "center",
+              marginBottom: "16px",
+              zIndex: 2,
+              flexShrink: 0
+            }}>
+              <span style={{
+                color: "#38bdf8",
+                fontSize: "14px",
+                fontWeight: 700,
+                letterSpacing: "0.05em",
+                textTransform: "uppercase"
+              }}>
+                📸 JOURNEY PHOTO COLLAGE
+              </span>
+              <h2 className="collage-title" style={{
+                color: "#ffffff",
+                fontSize: "24px",
+                fontWeight: 700,
+                margin: "6px 0 2px",
+                fontFamily: "Georgia, serif"
+              }}>
+                {'All Travel Memories'}
+              </h2>
+              <p className="collage-subtitle" style={{
+                color: "#94a3b8",
+                fontSize: "13px",
+                fontWeight: 500,
+                margin: "4px 0 8px"
+              }}>
+                {`${allPhotos.length} memories · ${locations.length} destinations · one journey`}
+              </p>
+              
+              {/* Batch indicator dots */}
+              {totalBatches > 1 && (
+                <div style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  gap: "8px",
+                  marginTop: "8px"
+                }}>
+                  {Array.from({ length: totalBatches }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        width: idx === currentBatchIndex ? "24px" : "8px",
+                        height: "8px",
+                        borderRadius: "4px",
+                        background: idx === currentBatchIndex ? "#38bdf8" : "rgba(56, 189, 248, 0.3)",
+                        transition: "all 0.3s ease",
+                        boxShadow: idx === currentBatchIndex ? "0 0 12px rgba(56, 189, 248, 0.5)" : "none"
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="collage-grid" style={{
+              display: "grid",
+              width: "100%",
+              maxWidth: "800px",
+              flex: "1",
+              gap: "8px",
+              padding: "4px",
+              gridTemplateColumns: `repeat(${getCollageColumns(allPhotos.length)}, minmax(0, 1fr))`,
+              gridAutoRows: "1fr",
+              maxHeight: "calc(100vh - 320px)",
+              overflow: "hidden",
+              position: "relative",
+              zIndex: 2
+            }}>
+              {allPhotos.map(({ url, locationName }, idx) => {
+                const staggerDelay = idx * COLLAGE_STAGGER_MS;
+                const progress = Math.max(0, Math.min(1, (collageElapsed - staggerDelay) / COLLAGE_ENTRY_DURATION_MS));
+                const entry = COLLAGE_ENTRY_VECTORS[idx % COLLAGE_ENTRY_VECTORS.length];
+                const scale = 0.72 + 0.28 * progress;
+                const opacity = progress;
+                
+                return (
+                  <div
+                    key={url}
+                    className="collage-tile"
+                    style={{
+                      position: "relative",
+                      aspectRatio: "1",
+                      borderRadius: "16px",
+                      overflow: "hidden",
+                      backgroundColor: "rgba(30, 58, 95, 0.3)",
+                      transform: `translate(${entry.x * (1 - progress)}px, ${entry.y * (1 - progress)}px) rotate(${entry.rotate * (1 - progress)}deg) scale(${scale})`,
+                      opacity: opacity,
+                      transition: "transform 0.12s linear, opacity 0.12s linear",
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.32)",
+                      border: "1px solid rgba(255,255,255,0.12)"
+                    }}
+                  >
+                    <img
+                      src={url}
+                      alt={locationName}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block"
+                      }}
+                      loading="lazy"
+                    />
+                    <div className="collage-caption"
+                      style={{
+                        position: "absolute",
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        padding: "6px 8px",
+                        background: "linear-gradient(to top, rgba(0,0,0,0.7), transparent)",
+                        color: "#ffffff",
+                        fontSize: "10px",
+                        fontWeight: 600,
+                        textAlign: "center",
+                        pointerEvents: "none",
+                        fontFamily: "system-ui, sans-serif"
+                      }}
+                    >
+                      {locationName}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="collage-footer" style={{
+              marginTop: "12px",
+              color: "#64748b",
+              fontSize: "12px",
+              fontWeight: 400,
+              textAlign: "center",
+              zIndex: 2,
+              letterSpacing: "0.03em",
+              flexShrink: 0
+            }}>
+              ✨ Every moment captured along the journey
+            </div>
+          </div>
+        )}
+
         {isOutro && (
           <div
             className="video-branding-card"
@@ -1701,14 +2053,13 @@ export function PreviewModal({
           >
             <div className="video-branding-content">
               <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
-              <span>ROAMLY STUDIO</span>
+              <span>Before We Die</span>
               <strong>Journey complete</strong>
               <small>Thanks for travelling with us</small>
             </div>
           </div>
         )}
 
-        {/* Video Player Bottom Controls */}
         <div className="video-controls">
           <div className="video-progress" aria-label="Video progress">
             <i style={{ width: `${internalProgress}%` }} />
@@ -1734,14 +2085,16 @@ export function PreviewModal({
             </button>
             <span>
               {isIntro
-                ? "Intro · Roamly Studio"
+                ? "Intro · Before We Die"
                 : isRouteMap
                   ? "Route Overview · 2D Map"
                   : isSummary
                     ? `Travel Summary · ${totalTripDistance}`
-                    : isOutro
-                      ? "Outro · Journey Complete"
-                      : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
+                    : isCollage
+                      ? `Photo Collage · ${totalBatches > 1 ? `Batch ${currentBatchIndex + 1}/${totalBatches}` : `${allPhotos.length} Photos`}`
+                      : isOutro
+                        ? "Outro · Journey Complete"
+                        : `${formatTime(elapsedSec)} / ${formatTime(effectiveDurationSec)} · Stop ${currentLegIndex + 1} of ${totalLegs} · ${destination.name}`}
             </span>
             <button aria-label="Fullscreen" onClick={fullscreen} disabled={recording}>
               <Expand />

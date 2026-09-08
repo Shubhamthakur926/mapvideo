@@ -25,6 +25,183 @@
   position: absolute;
   inset: 0;
 }
+.mapbox-vehicle-marker {
+  pointer-events: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  z-index: 50 !important;
+}
+
+.vehicle-3d {
+  --vehicle-bearing: 0deg;
+  --vehicle-roll: 0deg;
+  --vehicle-pitch: 18deg;
+  --vehicle-altitude: 0px;
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 450px;
+  pointer-events: none;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  will-change: transform;
+}
+
+/* Ground Contact Drop-Shadow */
+.vehicle-3d-shadow {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.25) 55%, transparent 75%);
+  filter: blur(4px);
+  pointer-events: none;
+  z-index: 1;
+  transition: transform 90ms linear, opacity 120ms ease, filter 120ms ease;
+}
+
+/* Dynamic Effects Layer (Contrails / Wakes) */
+.vehicle-3d-effects {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 250ms ease;
+  transform: rotateZ(var(--vehicle-bearing));
+  transform-origin: center center;
+}
+
+/* Flight Jet Contrails (Vapor Stream) */
+.flight-contrail {
+  position: absolute;
+  width: 3px;
+  height: 48px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.85) 0%, rgba(224, 242, 254, 0.4) 40%, transparent 100%);
+  border-radius: 2px;
+  filter: blur(1.5px);
+  transform-origin: top center;
+  animation: contrailPuff 0.4s infinite alternate ease-in-out;
+}
+.flight-contrail-left {
+  top: 56px;
+  left: 27px;
+}
+.flight-contrail-right {
+  top: 56px;
+  right: 27px;
+}
+
+@keyframes contrailPuff {
+  0% { transform: scaleX(0.9) scaleY(1); opacity: 0.7; }
+  100% { transform: scaleX(1.3) scaleY(1.15); opacity: 0.95; }
+}
+
+/* Ship Water Wake Trail */
+.ship-wake {
+  position: absolute;
+  width: 5px;
+  height: 52px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9) 0%, rgba(186, 230, 253, 0.5) 45%, transparent 100%);
+  border-radius: 50%;
+  filter: blur(2px);
+  transform-origin: top center;
+}
+.ship-wake-left {
+  top: 54px;
+  left: 24px;
+  transform: rotate(-12deg);
+}
+.ship-wake-right {
+  top: 54px;
+  right: 24px;
+  transform: rotate(12deg);
+}
+
+/* Navigation Strobe Lights */
+.strobe-light {
+  animation: strobeFlash 1.1s infinite cubic-bezier(0.1, 0.9, 0.2, 1);
+  transform-origin: center;
+}
+.strobe-red {
+  filter: drop-shadow(0 0 3px #ef4444);
+}
+.strobe-green {
+  filter: drop-shadow(0 0 3px #22c55e);
+}
+.strobe-white {
+  animation-duration: 0.75s;
+  filter: drop-shadow(0 0 4px #ffffff);
+}
+
+@keyframes strobeFlash {
+  0%, 85%, 100% { opacity: 0.15; }
+  90%, 94% { opacity: 1; filter: drop-shadow(0 0 6px #ffffff); }
+  92% { opacity: 0.3; }
+}
+
+.vehicle-3d-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  transform: rotateZ(var(--vehicle-bearing));
+  transform-style: preserve-3d;
+  z-index: 3;
+  transition: transform 90ms linear;
+}
+
+.vehicle-3d-model {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  transform-style: preserve-3d;
+  transition: transform 90ms linear;
+}
+
+.vehicle-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+}
+
+/* Specific Sizes for Crispness */
+.vehicle-3d-flight .vehicle-3d-model { width: 72px; height: 72px; }
+.vehicle-3d-flight { width: 88px; height: 88px; }
+.vehicle-3d-ship .vehicle-3d-model { width: 60px; height: 78px; }
+.vehicle-3d-train .vehicle-3d-model { width: 52px; height: 78px; }
+.vehicle-3d-bus .vehicle-3d-model { width: 54px; height: 72px; }
+.vehicle-3d-car .vehicle-3d-model,
+.vehicle-3d-taxi .vehicle-3d-model { width: 56px; height: 64px; }
+.vehicle-3d-bike .vehicle-3d-model,
+.vehicle-3d-bicycle .vehicle-3d-model { width: 46px; height: 58px; }
+.vehicle-3d-walking .vehicle-3d-model { width: 44px; height: 50px; }
+
+.vehicle-3d-walking .walking-svg {
+  animation: walkingBob 0.6s infinite alternate ease-in-out;
+}
+
+@keyframes walkingBob {
+  0% { transform: translateY(0) rotate(-3deg); }
+  100% { transform: translateY(-4px) rotate(3deg); }
+}
 .arrival-photo-fullscreen {
   position: absolute;
   z-index: 70;

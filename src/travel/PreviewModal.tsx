@@ -1,9 +1,10 @@
 import { Download, Expand, Loader2, Pause, Play, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { calculateDistanceKm, formatDistanceKm, MapboxGlobe } from "./MapboxGlobe";
+import { calculateDistanceKm, formatDistanceKm, MapboxGlobe, type MapboxGlobeHandle } from "./MapboxGlobe";
 import { RouteOverviewMap, type RouteOverviewMapHandle } from "./RouteOverviewMap";
 import { getLocationImages, getLocationVideo, type Location, type Transport } from "./types";
+import { vehicleSvgTemplates } from "./Vehicle3D";
 import "./map-video.css";
 import "./video-controls.css";
 
@@ -53,6 +54,91 @@ function getAudioBuffer(context: AudioContext, url: string): Promise<AudioBuffer
 
 function playPreviewAudio(audio: HTMLAudioElement) {
   void audio.play().catch((error) => console.warn("Vehicle sound autoplay was blocked.", error));
+}
+
+const vehicleCanvasCache = new Map<Transport, HTMLCanvasElement>();
+
+async function preloadVehicleImages(): Promise<Map<Transport, HTMLCanvasElement>> {
+  const transports = Object.keys(vehicleSvgTemplates) as Transport[];
+  await Promise.all(
+    transports.map(
+      (transport) =>
+        new Promise<void>((resolve) => {
+          if (vehicleCanvasCache.has(transport)) {
+            resolve();
+            return;
+          }
+          const rawSvg = vehicleSvgTemplates[transport];
+          if (!rawSvg) {
+            resolve();
+            return;
+          }
+          let svgClean = rawSvg.trim();
+          if (!svgClean.includes("xmlns=")) {
+            svgClean = svgClean.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+          }
+
+          // Extract viewBox dimensions to give the SVG concrete pixel width/height (avoid 0x0 naturalWidth in Chromium)
+          const vbMatch = svgClean.match(
+            /viewBox=["']\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*["']/i
+          );
+          const vbWidth = vbMatch ? parseFloat(vbMatch[3]) : 100;
+          const vbHeight = vbMatch ? parseFloat(vbMatch[4]) : 100;
+          const targetSize = 256;
+          const maxDim = Math.max(vbWidth, vbHeight, 1);
+          const scale = targetSize / maxDim;
+          const pixelWidth = Math.round(vbWidth * scale);
+          const pixelHeight = Math.round(vbHeight * scale);
+
+          // Replace width="..." and height="..." with concrete pixel dimensions
+          svgClean = svgClean.replace(/<svg\b([^>]*)>/i, (_match, attrs) => {
+            const cleaned = attrs
+              .replace(/\bwidth=["'][^"']*["']/gi, "")
+              .replace(/\bheight=["'][^"']*["']/gi, "")
+              .trim();
+            return `<svg ${cleaned} width="${pixelWidth}" height="${pixelHeight}">`;
+          });
+
+          const blob = new Blob([svgClean], { type: "image/svg+xml;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+
+          const bakeToCanvas = async () => {
+            try {
+              if (typeof img.decode === "function") {
+                await img.decode();
+              }
+            } catch {
+              // Ignore decode failures if already loaded
+            }
+            try {
+              const cvs = document.createElement("canvas");
+              cvs.width = pixelWidth;
+              cvs.height = pixelHeight;
+              const cctx = cvs.getContext("2d");
+              if (cctx) {
+                cctx.drawImage(img, 0, 0, pixelWidth, pixelHeight);
+                vehicleCanvasCache.set(transport, cvs);
+              }
+            } catch (err) {
+              console.warn("Could not bake vehicle to canvas:", transport, err);
+            }
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+
+          img.onload = bakeToCanvas;
+          img.onerror = (e) => {
+            console.warn(`Failed to preload vehicle SVG for ${transport}:`, e);
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+          img.src = url;
+        })
+    )
+  );
+  return vehicleCanvasCache;
 }
 
 // Calculate smooth fade-in and fade-out opacity envelope (0 -> 1 -> 0)
@@ -571,6 +657,7 @@ export function PreviewModal({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const routeOverviewRef = useRef<RouteOverviewMapHandle>(null);
+  const mapboxGlobeRef = useRef<MapboxGlobeHandle>(null);
   const [playing, setPlaying] = useState(true);
   const [timelineElapsed, setTimelineElapsed] = useState(0);
   const [restartKey, setRestartKey] = useState(0);
@@ -834,6 +921,7 @@ export function PreviewModal({
       BRAND_LOGO_URL,
     ];
     const preloadedImgs = await preloadImages(allPhotoUrls.filter(Boolean));
+    const preloadedVehicles = await preloadVehicleImages();
     const preloadedVideos = await preloadVideos(
       legSchedule.flatMap((schedule) => (schedule.video ? [schedule.video.url] : []))
     );
@@ -1030,43 +1118,94 @@ export function PreviewModal({
           ctx.fillRect(0, 0, 1080, 1080);
         }
 
-        // 2. Draw Moving Vehicle Marker & Destination Target Pill (during journey)
+        // 2. Draw Moving 3D Vehicle Marker & Destination Target Pill (during journey)
         if (!isArrival && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
+          const globeHandle = mapboxGlobeRef.current;
+          const liveMap = globeHandle?.getMap();
+          const vehicleState = globeHandle?.getVehicleState();
+
+          // Compute screen position: use live projected coordinate if available
+          let screenX = 540;
+          let screenY = 540;
+          let vehicleAngle = 0;
+
+          if (liveMap && vehicleState?.point) {
+            try {
+              const proj = liveMap.project([vehicleState.point.lng, vehicleState.point.lat]);
+              if (proj && Number.isFinite(proj.x) && Number.isFinite(proj.y)) {
+                const mapEl = liveMap.getCanvas();
+                const scaleX = 1080 / (mapEl?.clientWidth || 1080);
+                const scaleY = 1080 / (mapEl?.clientHeight || 1080);
+                screenX = proj.x * scaleX;
+                screenY = proj.y * scaleY;
+              }
+            } catch {
+              // fallback to center
+            }
+          }
+
+          if (vehicleState) {
+            vehicleAngle = vehicleState.screenBearing ?? vehicleState.bearing ?? 0;
+          }
+
           ctx.save();
-          // Outer halo pulse
+
+          // Shadow / Outer halo pulse
           ctx.beginPath();
-          ctx.arc(540, 540, 38, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(56, 189, 248, 0.35)";
+          ctx.arc(screenX, screenY + 4, 38, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(2, 132, 199, 0.28)";
           ctx.fill();
 
-          // Dark badge background
-          ctx.beginPath();
-          ctx.arc(540, 540, 26, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(3, 16, 29, 0.94)";
-          ctx.fill();
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = "#38bdf8";
-          ctx.shadowColor = "#38bdf8";
-          ctx.shadowBlur = 14;
-          ctx.stroke();
+          // Draw High-Quality 3D Vehicle SVG Model
+          const vehicleCanvas =
+            preloadedVehicles.get(curTransport) ||
+            preloadedVehicles.get("flight") ||
+            vehicleCanvasCache.get(curTransport) ||
+            vehicleCanvasCache.get("flight");
 
-          // Vehicle icon emoji
-          ctx.shadowBlur = 0;
-          ctx.font = "26px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(vehicleMark, 540, 541);
+          if (vehicleCanvas && vehicleCanvas.width > 0 && vehicleCanvas.height > 0) {
+            const aspect = vehicleCanvas.height / vehicleCanvas.width;
+            const baseSize =
+              curTransport === "flight" ? 76 : curTransport === "ship" ? 72 : curTransport === "train" ? 72 : 62;
+            const vWidth = baseSize;
+            const vHeight = baseSize * aspect;
+
+            ctx.save();
+            ctx.translate(screenX, screenY);
+            ctx.rotate((vehicleAngle * Math.PI) / 180);
+            ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+            ctx.shadowBlur = 14;
+            ctx.drawImage(vehicleCanvas, -vWidth / 2, -vHeight / 2, vWidth, vHeight);
+            ctx.restore();
+          } else {
+            // Modern sleek 3D directional arrow fallback (never the old emoji circle)
+            ctx.save();
+            ctx.translate(screenX, screenY);
+            ctx.rotate((vehicleAngle * Math.PI) / 180);
+            ctx.beginPath();
+            ctx.moveTo(0, -28);
+            ctx.lineTo(18, 20);
+            ctx.lineTo(0, 10);
+            ctx.lineTo(-18, 20);
+            ctx.closePath();
+            ctx.fillStyle = "#38bdf8";
+            ctx.shadowColor = "rgba(56, 189, 248, 0.8)";
+            ctx.shadowBlur = 16;
+            ctx.fill();
+            ctx.restore();
+          }
 
           // Destination Name Tag Pill floating above the vehicle
           const destNameText = `📍 Next: ${arrivalStop.name} (${arrivalStop.code})`;
           ctx.font = "700 15px system-ui, -apple-system, sans-serif";
           const textWidth = ctx.measureText(destNameText).width;
           const pillWidth = textWidth + 32;
+          const pillY = Math.max(70, screenY - 56);
 
           drawRoundedRect(
             ctx,
-            540 - pillWidth / 2,
-            464,
+            screenX - pillWidth / 2,
+            pillY,
             pillWidth,
             36,
             18,
@@ -1078,7 +1217,7 @@ export function PreviewModal({
           ctx.fillStyle = "#ffffff";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(destNameText, 540, 482);
+          ctx.fillText(destNameText, screenX, pillY + 18);
           ctx.restore();
         }
 
@@ -1410,6 +1549,7 @@ export function PreviewModal({
         )}
 
         <MapboxGlobe
+          ref={mapboxGlobeRef}
           key={restartKey}
           locations={locations}
           legs={legs}
@@ -1419,6 +1559,7 @@ export function PreviewModal({
           className="map-video-globe"
           hideOverlays
           showVehicle={!isMediaShowcase}
+          isRecording={recording}
         />
 
         {isJourney && isPhotoShowcase && !isVideoShowcase && (

@@ -1,6 +1,22 @@
 import mapboxgl from "mapbox-gl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getLocationImages, type Location, type Transport } from "./types";
+import { createVehicle3DElement, updateVehicle3D } from "./Vehicle3D";
+
+export interface MapboxGlobeHandle {
+  getMap: () => mapboxgl.Map | null;
+  getVehicleState: () => {
+    point: { lat: number; lng: number } | null;
+    bearing: number;
+    screenBearing: number;
+    transport: Transport;
+    isArrival: boolean;
+    arrivalStop: Location | null;
+    currentStop: Location | null;
+    pathFraction: number;
+    legFraction: number;
+  };
+}
 
 export const MAPBOX_TOKEN =
   (import.meta as {
@@ -26,7 +42,7 @@ export const MAPBOX_TOKEN =
   }).env?.REACT_APP_MAPBOX_TOKEN ||
   "";
 
-type Props = {
+export type Props = {
   locations: Location[];
   legs?: Transport[];
   progress?: number;
@@ -36,6 +52,7 @@ type Props = {
   onSelectDestination?: (location: Location) => void;
   hideOverlays?: boolean;
   showVehicle?: boolean;
+  isRecording?: boolean;
 };
 
 const vehicleMarks: Record<Transport, string> = {
@@ -98,6 +115,10 @@ function generateArcCoordinates(start: Location, end: Location, segments = 50): 
   return coords;
 }
 
+// NOTE (fix): reduced wiggle frequency/amplitude so the fallback "road" path
+// doesn't produce sharp local direction changes that confuse the bearing
+// calculation (which caused the vehicle icon to appear misaligned/tilted
+// relative to the route line).
 function generateCurvedRoadCoordinates(start: Location, end: Location, segments = 60): [number, number][] {
   const coords: [number, number][] = [];
   const dLng = end.lng - start.lng;
@@ -111,7 +132,8 @@ function generateCurvedRoadCoordinates(start: Location, end: Location, segments 
 
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const wave = Math.sin(t * Math.PI * 4) * 0.015 * dist;
+    // Was: Math.sin(t * Math.PI * 4) * 0.015 * dist  (too high frequency/amplitude)
+    const wave = Math.sin(t * Math.PI * 2) * 0.005 * dist;
     const lng = (1 - t) * (1 - t) * start.lng + 2 * (1 - t) * t * midLng + t * t * end.lng + wave;
     const lat = (1 - t) * (1 - t) * start.lat + 2 * (1 - t) * t * midLat + t * t * end.lat + wave;
     coords.push([lng, lat]);
@@ -334,22 +356,58 @@ async function fetchLegRoute(start: Location, end: Location, transport: Transpor
   return fallback;
 }
 
+function getInterpolatedPoint(coords: [number, number][], dists: number[], targetDist: number): { lat: number; lng: number } {
+  let segIdx = 0;
+  for (let i = 0; i < dists.length - 1; i++) {
+    if (targetDist >= dists[i] && targetDist <= dists[i + 1]) {
+      segIdx = i;
+      break;
+    }
+  }
+  const segStart = dists[segIdx];
+  const segEnd = dists[segIdx + 1];
+  const segFraction = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
+  const p1 = coords[segIdx];
+  const p2 = coords[segIdx + 1] || p1;
+  return {
+    lng: p1[0] + (p2[0] - p1[0]) * segFraction,
+    lat: p1[1] + (p2[1] - p1[1]) * segFraction,
+  };
+}
+
+// NOTE (fix): lookahead distance increased substantially. The old value
+// (0.005 * totalDist, min 0.0001) was small enough that on wavy/curved
+// fallback road paths the tangent it produced reflected a tiny local wiggle
+// instead of the vehicle's true direction of travel along the route -
+// causing the 3D vehicle icon's heading to visibly diverge from the blue
+// route line (see the misaligned taxi/car screenshots). A larger lookahead
+// smooths this out while still tracking real turns.
+// NOTE (fix): now also returns `tangentFrom`/`tangentTo` — the two lng/lat
+// points that define the direction-of-travel segment. `bearing` (geographic
+// compass bearing) is kept as a fallback for use before the map has loaded,
+// but the caller should prefer projecting tangentFrom/tangentTo through the
+// live map (map.project) to get the on-screen heading. A flat compass
+// bearing computed straight from lng/lat does NOT reliably match what's
+// rendered on a "globe" projection map, especially at high latitudes (e.g.
+// near Greenland/Iceland) where meridians converge — that mismatch is what
+// causes the vehicle icon to visibly point the wrong way relative to the
+// route line.
 function getPointAlongPolyline(
   coords: [number, number][],
   fraction: number
-): { pt: { lat: number; lng: number }; bearing: number } {
+): {
+  pt: { lat: number; lng: number };
+  bearing: number;
+  tangentFrom: { lat: number; lng: number };
+  tangentTo: { lat: number; lng: number };
+} {
   if (!coords || coords.length === 0) {
-    return { pt: { lat: 0, lng: 0 }, bearing: 0 };
+    const zero = { lat: 0, lng: 0 };
+    return { pt: zero, bearing: 0, tangentFrom: zero, tangentTo: zero };
   }
-  if (coords.length === 1 || fraction <= 0) {
-    const bearing = coords.length > 1 ? calculateBearing(coords[0][1], coords[0][0], coords[1][1], coords[1][0]) : 0;
-    return { pt: { lat: coords[0][1], lng: coords[0][0] }, bearing };
-  }
-  if (fraction >= 1) {
-    const last = coords[coords.length - 1];
-    const prev = coords[coords.length - 2] || last;
-    const bearing = calculateBearing(prev[1], prev[0], last[1], last[0]);
-    return { pt: { lat: last[1], lng: last[0] }, bearing };
+  if (coords.length === 1) {
+    const p = { lat: coords[0][1], lng: coords[0][0] };
+    return { pt: p, bearing: 0, tangentFrom: p, tangentTo: p };
   }
 
   const dists: number[] = [0];
@@ -363,30 +421,36 @@ function getPointAlongPolyline(
   }
 
   if (totalDist === 0) {
-    return { pt: { lat: coords[0][1], lng: coords[0][0] }, bearing: 0 };
+    const p = { lat: coords[0][1], lng: coords[0][0] };
+    return { pt: p, bearing: 0, tangentFrom: p, tangentTo: p };
   }
 
-  const targetDist = fraction * totalDist;
-  let segIdx = 0;
-  for (let i = 0; i < dists.length - 1; i++) {
-    if (targetDist >= dists[i] && targetDist <= dists[i + 1]) {
-      segIdx = i;
-      break;
-    }
+  const clampedFraction = Math.max(0, Math.min(1, fraction));
+  const targetDist = clampedFraction * totalDist;
+  const currentPt = getInterpolatedPoint(coords, dists, targetDist);
+
+  // Lookahead tangent for continuous smooth turning along curves
+  const lookaheadDist = Math.min(totalDist, targetDist + Math.max(0.035 * totalDist, 0.0008));
+  const lookaheadPt = getInterpolatedPoint(coords, dists, lookaheadDist);
+
+  let bearing = 0;
+  let tangentFrom = currentPt;
+  let tangentTo = lookaheadPt;
+
+  if (Math.hypot(lookaheadPt.lng - currentPt.lng, lookaheadPt.lat - currentPt.lat) > 1e-7) {
+    bearing = calculateBearing(currentPt.lat, currentPt.lng, lookaheadPt.lat, lookaheadPt.lng);
+    tangentFrom = currentPt;
+    tangentTo = lookaheadPt;
+  } else if (targetDist > 0) {
+    // If at the end of route, look back to retain final heading
+    const behindDist = Math.max(0, targetDist - Math.max(0.035 * totalDist, 0.0008));
+    const behindPt = getInterpolatedPoint(coords, dists, behindDist);
+    bearing = calculateBearing(behindPt.lat, behindPt.lng, currentPt.lat, currentPt.lng);
+    tangentFrom = behindPt;
+    tangentTo = currentPt;
   }
 
-  const segStart = dists[segIdx];
-  const segEnd = dists[segIdx + 1];
-  const segFraction = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
-
-  const p1 = coords[segIdx];
-  const p2 = coords[segIdx + 1] || p1;
-
-  const lng = p1[0] + (p2[0] - p1[0]) * segFraction;
-  const lat = p1[1] + (p2[1] - p1[1]) * segFraction;
-  const bearing = calculateBearing(p1[1], p1[0], p2[1], p2[0]);
-
-  return { pt: { lat, lng }, bearing };
+  return { pt: currentPt, bearing, tangentFrom, tangentTo };
 }
 
 function getPolylineUpTo(coords: [number, number][], fraction: number): [number, number][] {
@@ -490,21 +554,25 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
   }
 }
 
-export function MapboxGlobe({
-  locations,
-  legs = [],
-  progress: externalProgress,
-  activeLocation,
-  playing = true,
-  className = "",
-  onSelectDestination,
-  hideOverlays = false,
-  showVehicle = true,
-}: Props) {
+export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxGlobe(
+  {
+    locations,
+    legs = [],
+    progress: externalProgress,
+    activeLocation,
+    playing = true,
+    className = "",
+    onSelectDestination,
+    hideOverlays = false,
+    showVehicle = true,
+    isRecording = false,
+  }: Props,
+  ref
+) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const vehicleMarkerRef = useRef<mapboxgl.Marker | null>(null);
-  const vehicleIconRef = useRef<HTMLSpanElement | null>(null);
+  const vehicleIconRef = useRef<HTMLElement | null>(null);
   const stopMarkersRef = useRef<Array<{ marker: mapboxgl.Marker; badgeEl: HTMLElement; id: string }>>([]);
   const [internalProgress, setInternalProgress] = useState(0);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -560,8 +628,11 @@ export function MapboxGlobe({
     arrivalImages,
     arrivalShowcaseFraction,
     pathFraction,
+    tangentFrom,
+    tangentTo,
   } = useMemo(() => {
     if (locations.length < 2) {
+      const single = locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : { lat: 0, lng: 0 };
       return {
         currentPoint: locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : null,
         currentMark: "✈️",
@@ -578,6 +649,8 @@ export function MapboxGlobe({
         activePhotoIndex: 0,
         arrivalImages: [],
         arrivalShowcaseFraction: 0,
+        tangentFrom: single,
+        tangentTo: single,
       };
     }
 
@@ -596,7 +669,12 @@ export function MapboxGlobe({
     const arrivalActive = fraction >= TRAVEL_SPLIT;
     const pathFraction = arrivalActive ? 1.0 : Math.min(1.0, fraction / TRAVEL_SPLIT);
 
-    const { pt: point, bearing: calculatedBearing } = getPointAlongPolyline(coords, pathFraction);
+    const {
+      pt: point,
+      bearing: calculatedBearing,
+      tangentFrom: calcTangentFrom,
+      tangentTo: calcTangentTo,
+    } = getPointAlongPolyline(coords, pathFraction);
     const activeDisplayStop = fraction < 0.35 ? start : end;
 
     const arrivalShowcaseFraction = arrivalActive ? (fraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT) : 0;
@@ -620,6 +698,8 @@ export function MapboxGlobe({
       activePhotoIndex: photoIdx,
       arrivalImages: destImages,
       arrivalShowcaseFraction,
+      tangentFrom: calcTangentFrom,
+      tangentTo: calcTangentTo,
     };
   }, [totalLegs, currentProgress, legs, locations, legRoutes]);
 
@@ -700,27 +780,9 @@ export function MapboxGlobe({
       vehicleIconRef.current = null;
     }
 
-    const vehicleEl = document.createElement("div");
-    vehicleEl.className = "mapbox-vehicle-marker";
-    vehicleEl.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: rgba(3, 16, 29, 0.92);
-      border: 2px solid #38bdf8;
-      box-shadow: 0 0 20px rgba(56, 189, 248, 0.9), 0 8px 24px rgba(0,0,0,0.85);
-      pointer-events: none;
-      z-index: 100;
-    `;
-
-    const iconSpan = document.createElement("span");
-    iconSpan.style.cssText = "font-size: 26px; line-height: 1; display: block; user-select: none;";
-    iconSpan.textContent = currentMark || "✈️";
-    vehicleEl.appendChild(iconSpan);
-    vehicleIconRef.current = iconSpan;
+    const vehicleEl = createVehicle3DElement("flight");
+    vehicleEl.classList.add("mapbox-vehicle-marker");
+    vehicleIconRef.current = vehicleEl;
 
     const vehicleMarker = new mapboxgl.Marker({ element: vehicleEl, anchor: "center" })
       .setLngLat(initialCenter)
@@ -1009,9 +1071,7 @@ export function MapboxGlobe({
         vMarker.setLngLat([locations[0].lng, locations[0].lat]);
         vMarker.getElement().style.display = showVehicle ? "flex" : "none";
       }
-      if (vehicleIconRef.current) {
-        vehicleIconRef.current.textContent = "📍";
-      }
+      if (vehicleIconRef.current) vehicleIconRef.current.setAttribute("aria-label", "Route start");
       map.easeTo({
         center: [locations[0].lng, locations[0].lat],
         zoom: 4.5,
@@ -1028,19 +1088,58 @@ export function MapboxGlobe({
       vMarker.getElement().style.display = showVehicle ? "flex" : "none";
     }
     if (vehicleIconRef.current) {
-      vehicleIconRef.current.textContent = currentMark;
+      // NOTE (fix): don't trust the raw geographic bearing directly — on a
+      // "globe" projection, flat lng/lat compass bearing can diverge sharply
+      // from what's actually drawn on screen (most visible at high
+      // latitudes, e.g. near Greenland/Iceland, where meridians converge).
+      // Instead, project the tangent segment (tangentFrom -> tangentTo)
+      // through the live map to get real screen pixels, then derive the
+      // heading from those — this always matches the rendered route line,
+      // regardless of projection/pitch/latitude.
+      let screenBearing = bearing;
+      const distLngLat = Math.hypot(tangentTo.lng - tangentFrom.lng, tangentTo.lat - tangentFrom.lat);
+      if (distLngLat > 1e-9) {
+        try {
+          const screenA = map.project([tangentFrom.lng, tangentFrom.lat]);
+          const screenB = map.project([tangentTo.lng, tangentTo.lat]);
+          const dx = screenB.x - screenA.x;
+          const dy = screenB.y - screenA.y;
+          if (Math.hypot(dx, dy) > 0.5) {
+            screenBearing = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+          }
+        } catch {
+          // map.project can throw if called before the map is fully ready;
+          // fall back to the geographic bearing in that case.
+        }
+      }
+
+      updateVehicle3D(vehicleIconRef.current, transport, screenBearing, {
+        pathFraction,
+        legFraction,
+        isArrival,
+        isPlaying: playing,
+      });
     }
 
     if (isArrival && currentEnd) {
       if (playing) {
-        map.easeTo({
-          center: [currentEnd.lng, currentEnd.lat],
-          zoom: 7.0,
-          pitch: 42,
-          bearing: 0,
-          duration: 140,
-          easing: (t) => t,
-        });
+        if (isRecording) {
+          map.jumpTo({
+            center: [currentEnd.lng, currentEnd.lat],
+            zoom: 7.0,
+            pitch: 42,
+            bearing: 0,
+          });
+        } else {
+          map.easeTo({
+            center: [currentEnd.lng, currentEnd.lat],
+            zoom: 7.0,
+            pitch: 42,
+            bearing: 0,
+            duration: 140,
+            easing: (t) => t,
+          });
+        }
       }
     } else {
       const { zoom: targetZoom, pitch: targetPitch } = getCinematicCamera(
@@ -1051,17 +1150,65 @@ export function MapboxGlobe({
       );
 
       if (playing) {
-        map.easeTo({
-          center: [currentPoint.lng, currentPoint.lat],
-          zoom: targetZoom,
-          pitch: targetPitch,
-          bearing: 0,
-          duration: 120,
-          easing: (t) => t,
-        });
+        if (isRecording) {
+          map.jumpTo({
+            center: [currentPoint.lng, currentPoint.lat],
+            zoom: targetZoom,
+            pitch: targetPitch,
+            bearing: 0,
+          });
+        } else {
+          map.easeTo({
+            center: [currentPoint.lng, currentPoint.lat],
+            zoom: targetZoom,
+            pitch: targetPitch,
+            bearing: 0,
+            duration: 120,
+            easing: (t) => t,
+          });
+        }
       }
     }
-  }, [currentPoint, currentMark, transport, playing, currentStart, currentEnd, legFraction, isArrival, locations, showVehicle]);
+  }, [currentPoint, bearing, currentMark, transport, playing, currentStart, currentEnd, legFraction, pathFraction, isArrival, locations, showVehicle, tangentFrom, tangentTo, isRecording]);
+
+  useImperativeHandle(
+    ref,
+    () => {
+      const map = mapRef.current;
+      let screenBearing = bearing;
+      if (map) {
+        const distLngLat = Math.hypot(tangentTo.lng - tangentFrom.lng, tangentTo.lat - tangentFrom.lat);
+        if (distLngLat > 1e-9) {
+          try {
+            const screenA = map.project([tangentFrom.lng, tangentFrom.lat]);
+            const screenB = map.project([tangentTo.lng, tangentTo.lat]);
+            const dx = screenB.x - screenA.x;
+            const dy = screenB.y - screenA.y;
+            if (Math.hypot(dx, dy) > 0.5) {
+              screenBearing = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+            }
+          } catch {
+            // fallback to bearing
+          }
+        }
+      }
+      return {
+        getMap: () => mapRef.current,
+        getVehicleState: () => ({
+          point: currentPoint,
+          bearing,
+          screenBearing,
+          transport,
+          isArrival,
+          arrivalStop,
+          currentStop,
+          pathFraction,
+          legFraction,
+        }),
+      };
+    },
+    [currentPoint, bearing, transport, isArrival, arrivalStop, currentStop, pathFraction, legFraction, tangentFrom, tangentTo]
+  );
 
   useEffect(() => {
     if (!playing || externalProgress !== undefined) return;
@@ -1359,4 +1506,4 @@ export function MapboxGlobe({
       )}
     </div>
   );
-}
+});

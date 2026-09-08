@@ -32,6 +32,7 @@ const OUTRO_DURATION_MS = 2500;
 const FADE_TRANSITION_MS = 500;
 const VEHICLE_LEG_DURATION_MS = 4000;
 const PHOTO_DURATION_MS = 2000;
+const PHOTO_TRANSITION_MS = 480;
 const ROUTE_MAP_DURATION_MS = 3200;
 const COLLAGE_DURATION_MS = 8000;
 const COLLAGE_ENTRY_DURATION_MS = 800;
@@ -179,6 +180,17 @@ function getFadeOpacity(
     return Math.min(1, Math.max(0, timeRemaining / fadeOutDuration));
   }
   return 1;
+}
+
+type PhotoTransitionDirection = "left" | "right" | "top";
+
+function getPhotoTransitionDirection(photoIndex: number): PhotoTransitionDirection {
+  return (["left", "right", "top"] as const)[photoIndex % 3];
+}
+
+function getPhotoTransitionAnimation(photoIndex: number): string {
+  const direction = getPhotoTransitionDirection(photoIndex);
+  return `photoSlideFrom${direction[0].toUpperCase()}${direction.slice(1)} ${PHOTO_TRANSITION_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards`;
 }
 
 // Canvas drawing helper for rounded rectangles
@@ -1494,17 +1506,13 @@ export function PreviewModal({
             const activeImg = preloadedImgs.get(activePhotoUrl);
             const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
 
-            const popMs = 400;
-            const t = Math.min(1, Math.max(0, photoElapsed / popMs));
-            const c1 = 1.35;
-            const c3 = c1 + 1;
-            const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-            const scale = 0.35 + 0.65 * springEased;
+            const transitionProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_TRANSITION_MS));
+            const easedProgress = 1 - Math.pow(1 - transitionProgress, 3);
+            const transitionDirection = getPhotoTransitionDirection(photoIdx);
+            const dx = transitionDirection === "left" ? -1080 * (1 - easedProgress) : transitionDirection === "right" ? 1080 * (1 - easedProgress) : 0;
+            const dy = transitionDirection === "top" ? -1080 * (1 - easedProgress) : 0;
 
-            const dw = 1080 * scale, dh = 1080 * scale;
-            const dx = (1080 - dw) / 2, dy = (1080 - dh) / 2;
-
-            if (photoIdx > 0 && photoElapsed < popMs) {
+            if (photoIdx > 0 && photoElapsed < PHOTO_TRANSITION_MS) {
               const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
               const prevImg = preloadedImgs.get(prevPhotoUrl);
               if (prevImg) {
@@ -1513,15 +1521,7 @@ export function PreviewModal({
             }
 
             if (activeImg) {
-              if (t < 1) {
-                ctx.save();
-                ctx.shadowColor = "rgba(0,0,0,0.65)";
-                ctx.shadowBlur = 24;
-                ctx.drawImage(activeImg, dx, dy, dw, dh);
-                ctx.restore();
-              } else {
-                ctx.drawImage(activeImg, dx, dy, dw, dh);
-              }
+              ctx.drawImage(activeImg, dx, dy, 1080, 1080);
             } else {
               ctx.fillStyle = "#030e18";
               ctx.fillRect(0, 0, 1080, 1080);
@@ -1826,9 +1826,7 @@ export function PreviewModal({
                     height: "100%",
                     objectFit: "cover",
                     zIndex: isCurrent ? 2 : 1,
-                    animation: isCurrent
-                      ? "snappyPop 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards"
-                      : "none",
+                    animation: isCurrent ? getPhotoTransitionAnimation(photoIndex) : "none",
                   }}
                 />
               );

@@ -35,6 +35,7 @@
       "lat": 15.2993,
       "lng": 74.124,
       "transport": "bike",
+      "videoUrl": "/videos/goa.webm",
       "description": "Palolem Beach & tropical palm shores",
       "images": [
         "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1200&auto=format&fit=crop&q=85",
@@ -105,6 +106,7 @@
       "lat": 51.5074,
       "lng": -0.1278,
       "transport": "train",
+      "videoUrl": "/videos/london.webm",
       "description": "Big Ben, Tower Bridge & Trafalgar Square",
       "images": [
         "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1200&auto=format&fit=crop&q=85",
@@ -121,6 +123,7 @@
       "transport": "bus",
       "description": "King's College Chapel & River Cam punting",
       "images": [
+        "https://images.unsplash.com/photo-1564604761388-83eafc96f668?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1590059390046-512c1c696e59?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1582234372722-50d7ccc30ebd?w=1200&auto=format&fit=crop&q=85"
       ]
@@ -134,6 +137,7 @@
       "transport": "flight",
       "description": "Acropolis & ancient Parthenon citadel",
       "images": [
+        "https://images.unsplash.com/photo-1555993539-1732916b8235?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1603565816030-6b389eeb23cb?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1200&auto=format&fit=crop&q=85"
       ]

@@ -33,9 +33,9 @@ const FADE_TRANSITION_MS = 500;
 const VEHICLE_LEG_DURATION_MS = 4000;
 const PHOTO_DURATION_MS = 2000;
 const ROUTE_MAP_DURATION_MS = 3200;
-const COLLAGE_DURATION_MS = 6000;
-const COLLAGE_ENTRY_DURATION_MS = 3200;
-const COLLAGE_STAGGER_MS = 120;
+const COLLAGE_DURATION_MS = 8000;
+const COLLAGE_ENTRY_DURATION_MS = 800;
+const COLLAGE_STAGGER_MS = 50;
 const EXPORT_FRAME_RATE = 30;
 
 const COLLAGE_ENTRY_VECTORS = [
@@ -578,8 +578,8 @@ function drawPhotoCollage(
     const x = gridStartX + col * (cell + gap);
     const y = gridStartY + row * (cell + gap);
     
-    // Staggered animation
-    const staggerDelay = idx * COLLAGE_STAGGER_MS;
+    // Staggered animation capped so all photos complete entry promptly
+    const staggerDelay = Math.min(idx * COLLAGE_STAGGER_MS, 2000);
     const progress = Math.max(0, Math.min(1, (elapsedInCollage - staggerDelay) / COLLAGE_ENTRY_DURATION_MS));
     const entry = COLLAGE_ENTRY_VECTORS[idx % COLLAGE_ENTRY_VECTORS.length];
     const scale = 0.72 + 0.28 * progress;
@@ -1051,7 +1051,8 @@ export function PreviewModal({
     audio.loop = true;
     audio.muted = muted;
 
-    const targetVolume = isMediaShowcase ? BACKGROUND_MUSIC_DUCK_VOLUME : BACKGROUND_MUSIC_VOLUME;
+    // Only duck volume if an actual video showcase is playing; during photos keep full music volume
+    const targetVolume = isVideoShowcase ? BACKGROUND_MUSIC_DUCK_VOLUME : BACKGROUND_MUSIC_VOLUME;
     audio.volume = muted ? 0 : targetVolume;
 
     const musicUrl = new URL(BACKGROUND_MUSIC_URL, window.location.href).href;
@@ -1066,7 +1067,7 @@ export function PreviewModal({
     } else {
       audio.pause();
     }
-  }, [playing, isIntro, isMediaShowcase, muted, recording]);
+  }, [playing, isIntro, isVideoShowcase, muted, recording]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1224,7 +1225,8 @@ export function PreviewModal({
       const musicStart = audioStartTime + INTRO_DURATION_MS / 1000;
       const musicEnd = audioStartTime + totalPlaybackDuration / 1000;
       gain.gain.setValueAtTime(BACKGROUND_MUSIC_VOLUME, musicStart);
-      for (const w of arrivalWindows) {
+      // Only duck background music when an actual video clip with audio is playing; photos keep full music volume
+      for (const w of videoWindows) {
         const duckAt = audioStartTime + w.start / 1000;
         const restoreAt = audioStartTime + w.end / 1000;
         gain.gain.setValueAtTime(BACKGROUND_MUSIC_VOLUME, Math.max(musicStart, duckAt - 0.08));
@@ -1374,12 +1376,8 @@ export function PreviewModal({
           }
 
           ctx.save();
-          ctx.beginPath();
-          ctx.arc(screenX, screenY + 4, 38, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(2, 132, 199, 0.28)";
-          ctx.fill();
 
-          // Draw High-Quality 3D Vehicle SVG Model
+          // Draw High-Quality 3D Vehicle SVG Model (only vehicle, no circle background, no outline)
           const vehicleCanvas =
             preloadedVehicles.get(curTransport) ||
             preloadedVehicles.get("flight") ||
@@ -2163,7 +2161,7 @@ export function PreviewModal({
               zIndex: 2
             }}>
               {allPhotos.map(({ url, locationName }, idx) => {
-                const staggerDelay = idx * COLLAGE_STAGGER_MS;
+                const staggerDelay = Math.min(idx * COLLAGE_STAGGER_MS, 2000);
                 const progress = Math.max(0, Math.min(1, (collageElapsed - staggerDelay) / COLLAGE_ENTRY_DURATION_MS));
                 const entry = COLLAGE_ENTRY_VECTORS[idx % COLLAGE_ENTRY_VECTORS.length];
                 const scale = 0.72 + 0.28 * progress;

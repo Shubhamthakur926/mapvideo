@@ -611,3 +611,120 @@
   border-color: #86efac;
   color: #15803d;
 }
+
+/* new  */
+
+/* Photo Collage Styles - Simplified */
+.video-collage-card {
+  animation: collageFadeIn 0.6s ease forwards;
+  background:
+    radial-gradient(circle at 86% 8%, rgba(27, 111, 145, 0.34), transparent 33%),
+    radial-gradient(circle at 8% 95%, rgba(31, 78, 93, 0.22), transparent 32%),
+    #07131f !important;
+}
+
+.collage-header {
+  margin-bottom: 22px !important;
+}
+
+.collage-header > span {
+  color: #7dd3fc !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  letter-spacing: .18em !important;
+}
+
+.collage-title {
+  margin: 9px 0 5px !important;
+  font-size: clamp(28px, 3.4vw, 42px) !important;
+  letter-spacing: -.025em;
+  line-height: 1.05;
+}
+
+.collage-subtitle {
+  color: #b8c8d6 !important;
+  font-size: 13px !important;
+}
+
+.collage-grid {
+  max-width: 860px !important;
+  gap: 12px !important;
+  padding: 0 !important;
+  grid-auto-rows: minmax(0, 1fr) !important;
+}
+
+.collage-tile {
+  min-height: 0;
+  aspect-ratio: auto !important;
+  isolation: isolate;
+}
+
+.collage-tile::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 46%, rgba(2, 10, 18, 0.72) 100%);
+}
+
+.collage-caption {
+  z-index: 2;
+  padding: 16px !important;
+  background: transparent !important;
+  font-size: 11px !important;
+  font-weight: 750 !important;
+  letter-spacing: .04em;
+  text-align: left !important;
+}
+
+.collage-footer {
+  margin-top: 18px !important;
+  color: #91a7b6 !important;
+  font-size: 11px !important;
+  letter-spacing: .1em !important;
+  text-transform: uppercase;
+}
+
+/* Batch indicator dots animation */
+@keyframes dotPulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+@keyframes collagePop {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes collageFadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Batch transition animations */
+@keyframes batchFadeOut {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.8); }
+}
+
+@keyframes batchFadeIn {
+  0% { opacity: 0; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}

@@ -67,6 +67,13 @@ const vehicleMarks: Record<Transport, string> = {
   ship: "🚢",
 };
 
+const PHOTO_TRANSITION_MS = 480;
+
+function getPhotoTransitionAnimation(photoIndex: number): string {
+  const direction = (["Left", "Right", "Top"] as const)[photoIndex % 3];
+  return `photoSlideFrom${direction} ${PHOTO_TRANSITION_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards`;
+}
+
 // Fade envelope helper: ramps 0 -> 1 over the first `fadeIn` fraction of the
 // arrival showcase, then holds at 1 for the remainder. Used to smoothly fade
 // the full-screen arrival photo in as soon as the vehicle reaches a stop.
@@ -1411,7 +1418,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
         </div>
       )}
 
-      {/* Full-screen arrival photo showcase with fade-in and crossfade transitions
+      {/* Full-screen arrival photo showcase with directional transitions
           (replaces the old floating summary card entirely — no box, no grid,
           no thumbnails: the photo itself fills the frame). */}
       {!hideOverlays && isArrival && arrivalStop && (
@@ -1437,9 +1444,9 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
                   width: "100%",
                   height: "100%",
                   objectFit: "cover",
-                  opacity: idx === activePhotoIndex ? 1 : 0,
-                  transition: "opacity 0.4s ease-in-out",
-                  animation: idx === activePhotoIndex ? "popIn 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards" : "none",
+                  display: idx === activePhotoIndex || idx === activePhotoIndex - 1 ? "block" : "none",
+                  zIndex: idx === activePhotoIndex ? 2 : 1,
+                  animation: idx === activePhotoIndex ? getPhotoTransitionAnimation(activePhotoIndex) : "none",
                 }}
               />
             ))
@@ -1453,7 +1460,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
-                animation: "popIn 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards",
+                animation: getPhotoTransitionAnimation(0),
               }}
             />
           ) : null}

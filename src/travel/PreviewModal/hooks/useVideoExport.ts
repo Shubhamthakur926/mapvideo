@@ -35,7 +35,8 @@ import {
   preloadVideos,
   vehicleCanvasCache,
 } from "../utils/mediaPreloader";
-import { formatTime, getFadeOpacity, getPhotoTransitionDirection } from "../utils/previewFormatters";
+import { formatTime, getFadeOpacity } from "../utils/previewFormatters";
+import { getTripPhotoTransition, resetTripTransitionCache } from "../transitions";
 
 interface UseVideoExportParams {
   locations: Location[];
@@ -106,6 +107,7 @@ export function useVideoExport({
     }
 
     try {
+      resetTripTransitionCache();
       setRecording(true);
       setRecordProgress(0);
       setTimelineElapsed(0);
@@ -518,35 +520,22 @@ export function useVideoExport({
             } else {
               const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
               const activeImg = preloadedImgs.get(activePhotoUrl);
+              const prevPhotoUrl = photoIdx > 0 ? arrivalImages[photoIdx - 1] || "" : "";
+              const prevImg = prevPhotoUrl ? preloadedImgs.get(prevPhotoUrl) || null : null;
               const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
 
-              const transitionProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_TRANSITION_MS));
-              const easedProgress = 1 - Math.pow(1 - transitionProgress, 3);
-              const transitionDirection = getPhotoTransitionDirection(photoIdx);
-              const dx =
-                transitionDirection === "left"
-                  ? -1080 * (1 - easedProgress)
-                  : transitionDirection === "right"
-                    ? 1080 * (1 - easedProgress)
-                    : 0;
-              const dy = transitionDirection === "top" ? -1080 * (1 - easedProgress) : 0;
-
-              if (photoIdx > 0 && photoElapsed < PHOTO_TRANSITION_MS) {
-                const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
-                const prevImg = preloadedImgs.get(prevPhotoUrl);
-                if (prevImg) {
-                  ctx.drawImage(prevImg, 0, 0, 1080, 1080);
-                }
-              }
+              const transition = getTripPhotoTransition(legIdx, photoIdx);
+              const transDuration = transition.durationMs || PHOTO_TRANSITION_MS;
+              const progress = Math.min(1, Math.max(0, photoElapsed / transDuration));
 
               if (activeImg) {
-                ctx.drawImage(activeImg, dx, dy, 1080, 1080);
+                transition.applyCanvas(progress, ctx, activeImg, prevImg, 1080, 1080);
               } else {
                 ctx.fillStyle = "#030e18";
                 ctx.fillRect(0, 0, 1080, 1080);
               }
 
-              if (photoElapsed < 100) {
+              if (transition.hasFlashOverlay && photoElapsed < 100) {
                 const flashAlpha = (1 - photoElapsed / 100) * 0.35;
                 ctx.save();
                 ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;

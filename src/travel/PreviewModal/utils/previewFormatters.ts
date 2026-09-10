@@ -33,11 +33,28 @@ export function getFadeOpacity(
   return 1;
 }
 
+export {
+  getRandomPhotoTransition,
+  getTripPhotoTransition,
+  resetTripTransitionCache,
+} from "../transitions";
+export type { TransitionConfig } from "../transitions";
+
+/**
+ * @deprecated Use getRandomPhotoTransition() or getTripPhotoTransition() instead.
+ * Retained for backwards compatibility.
+ */
 export function getPhotoTransitionDirection(photoIndex: number): PhotoTransitionDirection {
   return (["left", "right", "top"] as const)[photoIndex % 3];
 }
 
-export function getPhotoTransitionAnimation(photoIndex: number): string {
+export function getPhotoTransitionAnimation(
+  photoIndex: number,
+  transitionName?: string
+): string {
+  if (transitionName) {
+    return `${transitionName} ${PHOTO_TRANSITION_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards`;
+  }
   const direction = getPhotoTransitionDirection(photoIndex);
   return `photoSlideFrom${direction[0].toUpperCase()}${direction.slice(1)} ${PHOTO_TRANSITION_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards`;
 }

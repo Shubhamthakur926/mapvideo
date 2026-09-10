@@ -24,9 +24,10 @@ const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
 const BACKGROUND_MUSIC_VOLUME = 0.6;
 const BACKGROUND_MUSIC_DUCK_VOLUME = 0.15;
 const BRAND_LOGO_URL = "/picture/App-logo.png";
+const INTRO_VIDEO_URL = "/videos/intro.mp4";
+const DEFAULT_INTRO_DURATION_MS = 6500;
 
 // Stage Durations
-const INTRO_DURATION_MS = 2500;
 const SUMMARY_DURATION_MS = 3600;
 const OUTRO_DURATION_MS = 2500;
 const FADE_TRANSITION_MS = 500;
@@ -882,6 +883,28 @@ export function PreviewModal({
   const [muted, setMuted] = useState(false);
   const [unavailableVideos, setUnavailableVideos] = useState<string[]>([]);
   const [clipDurations, setClipDurations] = useState<Record<string, number>>({});
+  const [introDurationMs, setIntroDurationMs] = useState<number>(DEFAULT_INTRO_DURATION_MS);
+  const introVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const media = document.createElement("video");
+    media.preload = "metadata";
+    media.src = INTRO_VIDEO_URL;
+    const updateDuration = () => {
+      if (Number.isFinite(media.duration) && media.duration > 0) {
+        setIntroDurationMs(Math.round(media.duration * 1000));
+      }
+    };
+    media.addEventListener("loadedmetadata", updateDuration);
+    media.load();
+    return () => {
+      media.removeEventListener("loadedmetadata", updateDuration);
+      media.removeAttribute("src");
+      media.load();
+    };
+  }, []);
+
+  const INTRO_DURATION_MS = introDurationMs;
 
   // Collect all unique photos from all locations
   const allPhotos = useMemo(() => {
@@ -973,7 +996,7 @@ export function PreviewModal({
   const currentBatchIndex = 0;
   const batchTransitionProgress = 0;
 
-  const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS) : 0;
+  const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS, 0, 400) : 0;
   const routeMapOpacity = isRouteMap ? getFadeOpacity(timelineElapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS) : 0;
   const summaryOpacity = isSummary ? getFadeOpacity(timelineElapsed - summaryStartTime, SUMMARY_DURATION_MS) : 0;
   const collageOpacity = isCollage ? getFadeOpacity(collageElapsed, COLLAGE_TOTAL_DURATION) : 0;
@@ -1104,12 +1127,35 @@ export function PreviewModal({
     }
   }, [playing, isVideoShowcase, restartKey, muted]);
 
+  useEffect(() => {
+    const video = introVideoRef.current;
+    if (!video) return;
+
+    if (playing && isIntro) {
+      void video.play().catch((error) => console.warn("Intro video could not start.", error));
+    } else {
+      video.pause();
+    }
+  }, [playing, isIntro, restartKey, muted]);
+
+  useEffect(() => {
+    const video = introVideoRef.current;
+    if (!video || !isIntro) return;
+    const targetTime = timelineElapsed / 1000;
+    if (Math.abs(video.currentTime - targetTime) > 0.3) {
+      video.currentTime = targetTime;
+    }
+  }, [timelineElapsed, isIntro]);
+
   const restart = () => {
     if (recording) return;
     audioRef.current?.pause();
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       audioRef.current.load();
+    }
+    if (introVideoRef.current) {
+      introVideoRef.current.currentTime = 0;
     }
     setTimelineElapsed(0);
     setRestartKey((value) => value + 1);
@@ -1173,9 +1219,10 @@ export function PreviewModal({
       ];
       const preloadedImgs = await preloadImages(allPhotoUrls.filter(Boolean));
       const preloadedVehicles = await preloadVehicleImages();
-      const preloadedVideos = await preloadVideos(
-        legSchedule.flatMap((schedule) => (schedule.video ? [schedule.video.url] : []))
-      );
+      const preloadedVideos = await preloadVideos([
+        INTRO_VIDEO_URL,
+        ...legSchedule.flatMap((schedule) => (schedule.video ? [schedule.video.url] : []))
+      ]);
       let activeExportVideoUrl: string | null = null;
 
     const canvas = document.createElement("canvas");
@@ -1216,7 +1263,7 @@ export function PreviewModal({
 
     const audioBuffers = new Map<string, AudioBuffer>();
     await Promise.all(
-      [BACKGROUND_MUSIC_URL, ...videoWindows.map((window) => window.videoUrl)].map(async (url) => {
+      [BACKGROUND_MUSIC_URL, INTRO_VIDEO_URL, ...videoWindows.map((window) => window.videoUrl)].map(async (url) => {
         try {
           audioBuffers.set(url, await getAudioBuffer(audioContext, url));
         } catch (error) {
@@ -1250,6 +1297,14 @@ export function PreviewModal({
       gain.gain.linearRampToValueAtTime(0, musicEnd);
       source.start(musicStart);
       source.stop(musicEnd);
+    }
+    const introAudio = audioBuffers.get(INTRO_VIDEO_URL);
+    if (introAudio) {
+      const source = audioContext.createBufferSource();
+      source.buffer = introAudio;
+      source.connect(audioDestination);
+      source.start(audioStartTime);
+      source.stop(audioStartTime + INTRO_DURATION_MS / 1000);
     }
     for (const window of videoWindows) {
       const clipAudio = audioBuffers.get(window.videoUrl);
@@ -1331,16 +1386,27 @@ export function PreviewModal({
         const recArrivalOpacity = isArrival
           ? getFadeOpacity(recElapsedInLeg - VEHICLE_LEG_DURATION_MS, recArrivalDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
           : 0;
-        const exportVideo = recVideo ? preloadedVideos.get(recVideo.url) : undefined;
-        if (recVideo?.url !== activeExportVideoUrl) {
+        const isRecIntro = elapsed < INTRO_DURATION_MS;
+        const introExportVideo = preloadedVideos.get(INTRO_VIDEO_URL);
+        const currentActiveVideoUrl = isRecIntro ? INTRO_VIDEO_URL : (recVideo?.url ?? null);
+        const currentActiveVideo = isRecIntro ? introExportVideo : (recVideo ? preloadedVideos.get(recVideo.url) : undefined);
+
+        if (currentActiveVideoUrl !== activeExportVideoUrl) {
           if (activeExportVideoUrl) preloadedVideos.get(activeExportVideoUrl)?.pause();
-          activeExportVideoUrl = recVideo?.url ?? null;
-          if (exportVideo) {
-            exportVideo.currentTime = 0;
-            exportVideo.playbackRate = 1;
-            void exportVideo.play().catch(() => undefined);
+          activeExportVideoUrl = currentActiveVideoUrl;
+          if (currentActiveVideo) {
+            currentActiveVideo.currentTime = isRecIntro ? elapsed / 1000 : 0;
+            currentActiveVideo.playbackRate = 1;
+            void currentActiveVideo.play().catch(() => undefined);
           }
         }
+        if (isRecIntro && introExportVideo) {
+          const targetSec = elapsed / 1000;
+          if (Math.abs(introExportVideo.currentTime - targetSec) > 0.25) {
+            introExportVideo.currentTime = targetSec;
+          }
+        }
+        const exportVideo = !isRecIntro && recVideo ? preloadedVideos.get(recVideo.url) : undefined;
         const photoIdx = isRecPhotoPhase
           ? Math.min(totalPhotos - 1, Math.floor(recPhotoElapsed / PHOTO_DURATION_MS))
           : 0;
@@ -1599,14 +1665,22 @@ export function PreviewModal({
         }
 
         if (elapsed < INTRO_DURATION_MS) {
-          const introFade = getFadeOpacity(elapsed, INTRO_DURATION_MS);
-          drawBrandingCard(
-            ctx,
-            preloadedImgs.get(BRAND_LOGO_URL),
-            "Your journey starts here",
-            `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
-            introFade
-          );
+          const introFade = getFadeOpacity(elapsed, INTRO_DURATION_MS, 0, 300);
+          ctx.save();
+          ctx.fillStyle = "#030e18";
+          ctx.fillRect(0, 0, 1080, 1080);
+          if (introExportVideo && introExportVideo.readyState >= 2) {
+            ctx.globalAlpha = introFade;
+            const vw = introExportVideo.videoWidth || 1280;
+            const vh = introExportVideo.videoHeight || 720;
+            const scale = Math.max(1080 / vw, 1080 / vh);
+            const dw = vw * scale;
+            const dh = vh * scale;
+            const dx = (1080 - dw) / 2;
+            const dy = (1080 - dh) / 2;
+            ctx.drawImage(introExportVideo, dx, dy, dw, dh);
+          }
+          ctx.restore();
         }
 
         if (elapsed >= routeMapStartTime && elapsed < summaryStartTime) {
@@ -1891,18 +1965,19 @@ export function PreviewModal({
         )}
 
         {isIntro && (
-          <div
-            className="video-branding-card"
+          <section
+            className="intro-video-fullscreen"
             style={{ opacity: introOpacity, transition: "opacity 0.05s linear" }}
-            aria-live="polite"
+            aria-label="Journey intro video"
           >
-            <div className="video-branding-content">
-              <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
-              <span>Before We Die</span>
-              <strong>Your journey starts here</strong>
-              <small>{`${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`}</small>
-            </div>
-          </div>
+            <video
+              ref={introVideoRef}
+              src={INTRO_VIDEO_URL}
+              autoPlay
+              playsInline
+              muted={muted}
+            />
+          </section>
         )}
 
         <div
@@ -2271,7 +2346,7 @@ export function PreviewModal({
             </button>
             <span>
               {isIntro
-                ? "Intro · Before We Die"
+                ? "Intro · Travel Video"
                 : isRouteMap
                   ? "Route Overview · 2D Map"
                   : isSummary

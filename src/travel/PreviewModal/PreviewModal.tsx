@@ -3,6 +3,7 @@ import { MapboxGlobe, type MapboxGlobeHandle } from "../MapboxGlobe";
 import type { RouteOverviewMapHandle } from "../RouteOverviewMap";
 import "../map-video.css";
 import "../video-controls.css";
+import "../cinematic-effects.css";
 import { ArrivalPhotoShowcase } from "./components/ArrivalPhotoShowcase";
 import { ArrivalVideoShowcase } from "./components/ArrivalVideoShowcase";
 import { CollageOverlay } from "./components/CollageOverlay";

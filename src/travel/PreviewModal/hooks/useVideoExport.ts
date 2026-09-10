@@ -35,7 +35,8 @@ import {
   preloadVideos,
   vehicleCanvasCache,
 } from "../utils/mediaPreloader";
-import { formatTime, getFadeOpacity, getPhotoTransitionDirection } from "../utils/previewFormatters";
+import { formatTime, getFadeOpacity } from "../utils/previewFormatters";
+import { drawCinematicPhotoOnCanvas, getCinematicEffect } from "../../CinematicEffects";
 
 interface UseVideoExportParams {
   locations: Location[];
@@ -159,6 +160,17 @@ export function useVideoExport({
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
 
+      // Put the branded intro onto the canvas before its stream is recorded.
+      // This guarantees the first captured frame is the opening card, never a
+      // blank canvas while the animation loop is scheduling its first frame.
+      drawBrandingCard(
+        ctx,
+        preloadedImgs.get(BRAND_LOGO_URL),
+        "Your journey starts here",
+        `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
+        1
+      );
+
       const canvasStream = canvas.captureStream(EXPORT_FRAME_RATE);
       const audioContext = new AudioContext();
       const audioDestination = audioContext.createMediaStreamDestination();
@@ -251,7 +263,7 @@ export function useVideoExport({
       ]);
       const recorder = new MediaRecorder(combinedStream, {
         mimeType: mime,
-        videoBitsPerSecond: 14000000,
+        videoBitsPerSecond: 8000000,
       });
       const chunks: BlobPart[] = [];
 
@@ -269,10 +281,10 @@ export function useVideoExport({
       let lastRenderedAt = started - frameInterval;
 
       await new Promise<void>((resolve) => {
-        const anim = (now: number) => {
+        const anim = async (now: number) => {
           const elapsed = now - started;
 
-          if (elapsed < length && now - lastRenderedAt < frameInterval) {
+          if (elapsed < length && now - lastRenderedAt < frameInterval - 4) {
             requestAnimationFrame(anim);
             return;
           }
@@ -318,7 +330,7 @@ export function useVideoExport({
             ? getFadeOpacity(
                 recElapsedInLeg - VEHICLE_LEG_DURATION_MS,
                 recArrivalDuration,
-                FADE_TRANSITION_MS,
+                50,
                 FADE_TRANSITION_MS
               )
             : 0;
@@ -342,7 +354,7 @@ export function useVideoExport({
           }
           if (isRecIntro && introExportVideo) {
             const targetSec = elapsed / 1000;
-            if (Math.abs(introExportVideo.currentTime - targetSec) > 0.25) {
+            if (Math.abs(introExportVideo.currentTime - targetSec) > 0.5) {
               introExportVideo.currentTime = targetSec;
             }
           }
@@ -351,6 +363,18 @@ export function useVideoExport({
             ? Math.min(totalPhotos - 1, Math.floor(recPhotoElapsed / PHOTO_DURATION_MS))
             : 0;
           const curSec = Math.floor(elapsed / 1000);
+
+          const totalLegs = Math.max(1, locations.length - 1);
+          const recTravelProgress = Math.min(1, recElapsedInLeg / VEHICLE_LEG_DURATION_MS);
+          const recMapProgress = Math.min(
+            1,
+            (legIdx + (isArrival ? 0.999999 : recTravelProgress * 0.55)) / totalLegs
+          );
+
+          const globeHandle = mapboxGlobeRef.current;
+          if (globeHandle && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
+            await globeHandle.renderFrame(recMapProgress);
+          }
 
           const recCurrentBatchIndex = 0;
           const recBatchTransitionProgress = 0;
@@ -365,7 +389,6 @@ export function useVideoExport({
           }
 
           if (!isArrival && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
-            const globeHandle = mapboxGlobeRef.current;
             const liveMap = globeHandle?.getMap();
             const vehicleState = globeHandle?.getVehicleState();
 
@@ -503,35 +526,40 @@ export function useVideoExport({
             ctx.save();
             ctx.globalAlpha = recArrivalOpacity;
 
-            if (recVideo && exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-              const popMs = 400;
-              const t = Math.min(1, Math.max(0, recArrivalElapsed / popMs));
-              const c1 = 1.35;
-              const c3 = c1 + 1;
-              const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-              const scale = 0.35 + 0.65 * springEased;
-              const dw = 1080 * scale,
-                dh = 1080 * scale;
-              const dx = (1080 - dw) / 2,
-                dy = (1080 - dh) / 2;
-              ctx.drawImage(exportVideo, dx, dy, dw, dh);
+            const isStopVideo = Boolean(recSchedule?.video);
+
+            if (isStopVideo) {
+              if (exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                const popMs = 400;
+                const t = Math.min(1, Math.max(0, recArrivalElapsed / popMs));
+                const c1 = 1.35;
+                const c3 = c1 + 1;
+                const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+                const scale = 0.35 + 0.65 * springEased;
+                const dw = 1080 * scale,
+                  dh = 1080 * scale;
+                const dx = (1080 - dw) / 2,
+                  dy = (1080 - dh) / 2;
+                ctx.drawImage(exportVideo, dx, dy, dw, dh);
+              } else if (exportVideo) {
+                ctx.drawImage(exportVideo, 0, 0, 1080, 1080);
+              } else {
+                const activePhotoUrl = arrivalImages[0] || arrivalStop.imageUrl || "";
+                const activeImg = preloadedImgs.get(activePhotoUrl);
+                if (activeImg) {
+                  ctx.drawImage(activeImg, 0, 0, 1080, 1080);
+                } else {
+                  ctx.fillStyle = "#030e18";
+                  ctx.fillRect(0, 0, 1080, 1080);
+                }
+              }
             } else {
               const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
               const activeImg = preloadedImgs.get(activePhotoUrl);
               const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
+              const photoEffectIndex = legIdx * 3 + photoIdx;
 
-              const transitionProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_TRANSITION_MS));
-              const easedProgress = 1 - Math.pow(1 - transitionProgress, 3);
-              const transitionDirection = getPhotoTransitionDirection(photoIdx);
-              const dx =
-                transitionDirection === "left"
-                  ? -1080 * (1 - easedProgress)
-                  : transitionDirection === "right"
-                    ? 1080 * (1 - easedProgress)
-                    : 0;
-              const dy = transitionDirection === "top" ? -1080 * (1 - easedProgress) : 0;
-
-              if (photoIdx > 0 && photoElapsed < PHOTO_TRANSITION_MS) {
+              if (photoIdx > 0 && photoElapsed < 550) {
                 const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
                 const prevImg = preloadedImgs.get(prevPhotoUrl);
                 if (prevImg) {
@@ -540,26 +568,18 @@ export function useVideoExport({
               }
 
               if (activeImg) {
-                ctx.drawImage(activeImg, dx, dy, 1080, 1080);
+                drawCinematicPhotoOnCanvas(ctx, activeImg, photoEffectIndex, photoIdx, photoElapsed);
               } else {
                 ctx.fillStyle = "#030e18";
                 ctx.fillRect(0, 0, 1080, 1080);
               }
-
-              if (photoElapsed < 100) {
-                const flashAlpha = (1 - photoElapsed / 100) * 0.35;
-                ctx.save();
-                ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
-                ctx.fillRect(0, 0, 1080, 1080);
-                ctx.restore();
-              }
             }
 
-            const gradient = ctx.createLinearGradient(0, 800, 0, 1080);
+            const gradient = ctx.createLinearGradient(0, 780, 0, 1080);
             gradient.addColorStop(0, "rgba(3, 16, 29, 0)");
-            gradient.addColorStop(1, "rgba(3, 16, 29, 0.88)");
+            gradient.addColorStop(1, "rgba(3, 16, 29, 0.92)");
             ctx.fillStyle = gradient;
-            ctx.fillRect(0, 800, 1080, 280);
+            ctx.fillRect(0, 780, 1080, 300);
 
             ctx.textAlign = "left";
             ctx.textBaseline = "alphabetic";
@@ -577,12 +597,30 @@ export function useVideoExport({
             ctx.fillStyle = "#d9f4ff";
             ctx.font = "700 19px system-ui, sans-serif";
             ctx.fillText(
-              recVideo
+              isStopVideo
                 ? `${arrivalStop.country} · Travel video`
                 : `${arrivalStop.country} · Photo ${photoIdx + 1} of ${totalPhotos}`,
               60,
               996
             );
+
+            if (!isStopVideo) {
+              const photoEffectIndex = legIdx * 3 + photoIdx;
+              const eff = getCinematicEffect(photoEffectIndex);
+              const badgeText = eff.badge;
+              ctx.save();
+              ctx.font = "800 12px system-ui, sans-serif";
+              const badgeW = ctx.measureText(badgeText).width + 36;
+              drawRoundedRect(ctx, 60, 1012, badgeW, 26, 13, "rgba(2, 9, 20, 0.75)", eff.accentColor, 1.5);
+              ctx.fillStyle = eff.accentColor;
+              ctx.beginPath();
+              ctx.arc(74, 1025, 4, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = "#e8f5ff";
+              ctx.textBaseline = "middle";
+              ctx.fillText(badgeText, 85, 1025);
+              ctx.restore();
+            }
 
             ctx.restore();
           }

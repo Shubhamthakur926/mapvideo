@@ -30,22 +30,6 @@ export function ArrivalVideoShowcase({
       style={{ opacity: arrivalMediaOpacity }}
       aria-label={`${destination.name} travel video`}
     >
-      <div className="micro-flash-overlay" key={`flash-${currentLegIndex}`} />
-      {activePhotoUrl ? (
-        <img
-          src={activePhotoUrl}
-          alt={`${destination.name} travel moment`}
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            filter: "brightness(0.55) saturate(0.8)",
-            zIndex: 0,
-          }}
-        />
-      ) : null}
       <video
         ref={videoRef}
         key={activeSchedule.video.url}

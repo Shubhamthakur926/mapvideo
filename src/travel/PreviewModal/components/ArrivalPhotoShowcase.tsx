@@ -1,6 +1,10 @@
 import type { Location } from "../../types";
 import type { LegScheduleItem } from "../types/preview.types";
-import { getPhotoTransitionAnimation } from "../utils/previewFormatters";
+import {
+  CinematicPhotoOverlay,
+  getCinematicEffect,
+  getPhotoTransitionAnimation,
+} from "../../CinematicEffects";
 
 interface ArrivalPhotoShowcaseProps {
   arrivalMediaOpacity: number;
@@ -23,13 +27,15 @@ export function ArrivalPhotoShowcase({
     ? activeSchedule.images
     : [destination.imageUrl || ""];
 
+  const effectIndex = currentLegIndex * 3 + photoIndex;
+  const currentEffect = getCinematicEffect(effectIndex);
+
   return (
     <section
       className="arrival-photo-fullscreen"
       style={{ opacity: arrivalMediaOpacity }}
       aria-label={`${destination.name} travel photo`}
     >
-      <div className="micro-flash-overlay" key={`flash-${currentLegIndex}-${photoIndex}`} />
       {imagesToRender.map((url, idx) => {
         if (!url) return null;
         const isCurrent = idx === photoIndex;
@@ -48,17 +54,33 @@ export function ArrivalPhotoShowcase({
               height: "100%",
               objectFit: "cover",
               zIndex: isCurrent ? 2 : 1,
-              animation: isCurrent ? getPhotoTransitionAnimation(photoIndex) : "none",
+              animation: isCurrent
+                ? getPhotoTransitionAnimation(effectIndex, photoIndex)
+                : "none",
             }}
           />
         );
       })}
+      <CinematicPhotoOverlay
+        key={`photo-effect-${currentLegIndex}-${photoIndex}`}
+        effectIndex={effectIndex}
+      />
       <div className="arrival-photo-caption" style={{ position: "relative", zIndex: 3 }}>
         <span>ARRIVED · STOP {currentLegIndex + 2} OF {totalLegs + 1}</span>
         <h2>{destination.name}</h2>
         <p>
           {destination.country} · Photo {photoIndex + 1} of {activeSchedule?.photoCount ?? 1} · 2 seconds
         </p>
+        <div
+          className="cinematic-effect-badge"
+          style={{ borderColor: currentEffect.accentColor }}
+        >
+          <span
+            className="badge-dot"
+            style={{ backgroundColor: currentEffect.accentColor }}
+          />
+          <span>{currentEffect.badge}</span>
+        </div>
       </div>
     </section>
   );

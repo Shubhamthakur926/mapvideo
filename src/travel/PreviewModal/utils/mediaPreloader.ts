@@ -124,13 +124,18 @@ export async function preloadImages(urls: string[]): Promise<Map<string, HTMLIma
               resolve();
             }
           };
-          const timer = setTimeout(finish, 2500);
+          // Canvas export cannot use a photo until it is fully decoded. A short
+          // timeout previously let recording begin with missing photos, which
+          // made the downloaded video show the black fallback frame.
+          const timer = setTimeout(finish, 15000);
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.onload = () => {
             clearTimeout(timer);
-            map.set(url, img);
-            finish();
+            void img.decode().catch(() => undefined).finally(() => {
+              map.set(url, img);
+              finish();
+            });
           };
           img.onerror = () => {
             clearTimeout(timer);

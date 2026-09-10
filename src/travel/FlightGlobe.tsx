@@ -1,5 +1,7 @@
+// @ts-ignore
 import Globe from "react-globe.gl";
 import { useEffect, useMemo, useRef, useState } from "react";
+// @ts-ignore
 import type { GlobeMethods } from "react-globe.gl";
 import type { Location, Transport } from "./types";
 
@@ -193,7 +195,7 @@ export function FlightGlobe({
         pointsData={locations}
         pointLat="lat"
         pointLng="lng"
-        pointColor={(point) => (point === activeLocation || point === currentStop ? "#ffffff" : "#53d7ff")}
+        pointColor={(point: any) => (point === activeLocation || point === currentStop ? "#ffffff" : "#53d7ff")}
         pointAltitude={0.06}
         pointRadius={0.22}
         arcsData={arcs}
@@ -212,7 +214,7 @@ export function FlightGlobe({
         htmlLng="lng"
         htmlAltitude="altitude"
         htmlTransitionDuration={0}
-        htmlElement={(item) => {
+        htmlElement={(item: any) => {
           const data = item as {
             type: "vehicle" | "destination";
             mark?: string;

@@ -2,6 +2,7 @@ import mapboxgl from "mapbox-gl";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getLocationImages, type Location, type Transport } from "./types";
 import { createVehicle3DElement, updateVehicle3D } from "./Vehicle3D";
+import { getPhotoTransitionAnimation, CinematicPhotoOverlay, getCinematicEffect } from "./CinematicEffects";
 
 export interface MapboxGlobeHandle {
   getMap: () => mapboxgl.Map | null;
@@ -46,29 +47,8 @@ export interface MapboxGlobeHandle {
   renderFrame: (progress: number) => Promise<void>;
 }
 
-export const MAPBOX_TOKEN =
-  (import.meta as {
-    env?: {
-      VITE_MAPBOX_TOKEN?: string;
-      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
-      REACT_APP_MAPBOX_TOKEN?: string;
-    };
-  }).env?.VITE_MAPBOX_TOKEN ||
-  (import.meta as {
-    env?: {
-      VITE_MAPBOX_TOKEN?: string;
-      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
-      REACT_APP_MAPBOX_TOKEN?: string;
-    };
-  }).env?.NEXT_PUBLIC_MAPBOX_TOKEN ||
-  (import.meta as {
-    env?: {
-      VITE_MAPBOX_TOKEN?: string;
-      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
-      REACT_APP_MAPBOX_TOKEN?: string;
-    };
-  }).env?.REACT_APP_MAPBOX_TOKEN ||
-  "";
+export const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || "";
+
 
 export type Props = {
   locations: Location[];
@@ -98,7 +78,7 @@ const vehicleMarks: Record<Transport, string> = {
 // Fade envelope helper: ramps 0 -> 1 over the first `fadeIn` fraction of the
 // arrival showcase, then holds at 1 for the remainder. Used to smoothly fade
 // the full-screen arrival photo in as soon as the vehicle reaches a stop.
-function getArrivalFadeOpacity(fraction: number, fadeIn = 0.12): number {
+function getArrivalFadeOpacity(fraction: number, fadeIn = 0.01): number {
   if (fraction <= 0) return 0;
   if (fraction >= 1) return 1;
   if (fraction < fadeIn) return fraction / fadeIn;
@@ -565,6 +545,7 @@ export function getCinematicCamera(start: Location, end: Location, fraction: num
     }
   }
 
+  // Ground, sea & road transport
   if (dist >= 2500) {
     return { zoom: 3.5, pitch: 35 };
   } else if (dist >= 1200) {
@@ -824,6 +805,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
       antialias: true,
       preserveDrawingBuffer: true,
       maxZoom: 12,
+      maxTileCacheSize: 200,
       renderWorldCopies: false,
     });
 
@@ -857,9 +839,22 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             "line-color": "#0284c7",
-            "line-width": 8,
-            "line-opacity": 0.6,
-            "line-blur": 4,
+            "line-width": 12,
+            "line-opacity": 0.75,
+            "line-blur": 6,
+          },
+        });
+
+        map.addLayer({
+          id: "journey-route-line-neon",
+          type: "line",
+          source: "journey-route-base",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#38bdf8",
+            "line-width": 5,
+            "line-opacity": 0.95,
+            "line-blur": 2,
           },
         });
 
@@ -869,9 +864,9 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           source: "journey-route-base",
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": "#38bdf8",
-            "line-width": 3.5,
-            "line-opacity": 0.9,
+            "line-color": "#ffffff",
+            "line-width": 2,
+            "line-opacity": 1.0,
           },
         });
       }
@@ -1228,7 +1223,6 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
         Math.min(1, legFraction / 0.55),
         transport
       );
-
       if (playing) {
         if (isRecording) {
           map.jumpTo({
@@ -1251,6 +1245,8 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
     }
   }, [currentPoint, bearing, currentMark, transport, playing, currentStart, currentEnd, legFraction, pathFraction, isArrival, locations, showVehicle, tangentFrom, tangentTo, isRecording]);
 
+  const lastFrameDataRef = useRef<VehicleFrame | null>(null);
+
   useImperativeHandle(
     ref,
     () => {
@@ -1258,17 +1254,29 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
         getMap: () => mapRef.current,
         getVehicleState: () => {
           const map = mapRef.current;
-          const screenBearing = computeScreenBearing(map, tangentFrom, tangentTo, bearing);
-          return {
-            point: currentPoint,
+          const activeData = lastFrameDataRef.current ?? {
+            currentPoint,
             bearing,
-            screenBearing,
+            tangentFrom,
+            tangentTo,
             transport,
             isArrival,
             arrivalStop,
             currentStop,
             pathFraction,
             legFraction,
+          };
+          const screenBearing = computeScreenBearing(map, activeData.tangentFrom, activeData.tangentTo, activeData.bearing);
+          return {
+            point: activeData.currentPoint,
+            bearing: activeData.bearing,
+            screenBearing,
+            transport: activeData.transport,
+            isArrival: activeData.isArrival,
+            arrivalStop: activeData.arrivalStop,
+            currentStop: activeData.currentStop,
+            pathFraction: activeData.pathFraction,
+            legFraction: activeData.legFraction,
           };
         },
         // See MapboxGlobeHandle.renderFrame doc comment above for the full
@@ -1282,6 +1290,8 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           if (!map || locations.length < 2) return;
 
           const frameData = computeVehicleFrame(locations, legs, legRoutesRef.current, progressValue);
+          lastFrameDataRef.current = frameData;
+
           const {
             currentPoint: framePoint,
             currentStart: frameStart,
@@ -1339,7 +1349,15 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           // guaranteed to reflect this exact progress value before they
           // capture it.
           await new Promise<void>((resolve) => {
-            map.once("render", () => resolve());
+            let done = false;
+            const finish = () => {
+              if (!done) {
+                done = true;
+                resolve();
+              }
+            };
+            map.once("render", finish);
+            setTimeout(finish, 25);
           });
         },
       };
@@ -1551,7 +1569,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
       {/* Full-screen arrival photo showcase with fade-in and crossfade transitions
           (replaces the old floating summary card entirely — no box, no grid,
           no thumbnails: the photo itself fills the frame). */}
-      {!hideOverlays && isArrival && arrivalStop && (
+      {!hideOverlays && isArrival && arrivalStop && !arrivalStop.videoUrl && (
         <div
           style={{
             position: "absolute",
@@ -1563,25 +1581,30 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           }}
         >
           {arrivalImages.length > 0 ? (
-            arrivalImages.map((imgUrl, idx) => (
-              <img
-                key={imgUrl + idx}
-                src={imgUrl}
-                alt={`${arrivalStop.name} photo ${idx + 1}`}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  opacity: idx === activePhotoIndex ? 1 : 0,
-                  transition: "opacity 0.4s ease-in-out",
-                  animation: idx === activePhotoIndex ? "popIn 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards" : "none",
-                }}
-              />
-            ))
+            arrivalImages.map((imgUrl, idx) => {
+              const isCurrent = idx === activePhotoIndex;
+              const isPrevious = idx === activePhotoIndex - 1;
+              if (!isCurrent && !isPrevious) return null;
+              return (
+                <img
+                  key={`${imgUrl}-${activeLegIndex}-${idx}-${isCurrent ? activePhotoIndex : "prev"}`}
+                  src={imgUrl}
+                  alt={`${arrivalStop.name} photo ${idx + 1}`}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    zIndex: isCurrent ? 2 : 1,
+                    animation: isCurrent ? getPhotoTransitionAnimation(activeLegIndex * 3 + idx, idx) : "none",
+                  }}
+                />
+              );
+            })
           ) : arrivalStop.imageUrl ? (
             <img
+              key={`stop-${arrivalStop.name}-${activeLegIndex}`}
               src={arrivalStop.imageUrl}
               alt={arrivalStop.name}
               style={{
@@ -1590,10 +1613,16 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
-                animation: "popIn 450ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards",
+                animation: getPhotoTransitionAnimation(activeLegIndex * 3, 0),
               }}
             />
           ) : null}
+
+          {/* Transient cinematic transition overlay that fades out quickly */}
+          <CinematicPhotoOverlay
+            key={`globe-effect-${activeLegIndex}-${activePhotoIndex}`}
+            effectIndex={activeLegIndex * 3 + activePhotoIndex}
+          />
 
           {/* Soft bottom gradient so the caption stays readable over any photo */}
           <div
@@ -1604,6 +1633,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
               right: 0,
               padding: "56px 32px 28px",
               background: "linear-gradient(to top, rgba(3, 16, 29, 0.92) 0%, rgba(3, 16, 29, 0) 100%)",
+              zIndex: 6,
             }}
           >
             <div
@@ -1637,6 +1667,16 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
             <div style={{ fontSize: "13px", color: "#cbd5e1", marginTop: "4px" }}>
               {arrivalStop.country} · {arrivalStop.code}
               {arrivalImages.length > 0 && ` · Photo ${activePhotoIndex + 1} of ${arrivalImages.length}`}
+            </div>
+            <div
+              className="cinematic-effect-badge"
+              style={{ borderColor: getCinematicEffect(activeLegIndex * 3 + activePhotoIndex).accentColor, marginTop: "8px" }}
+            >
+              <span
+                className="badge-dot"
+                style={{ backgroundColor: getCinematicEffect(activeLegIndex * 3 + activePhotoIndex).accentColor }}
+              />
+              <span>{getCinematicEffect(activeLegIndex * 3 + activePhotoIndex).badge}</span>
             </div>
           </div>
         </div>

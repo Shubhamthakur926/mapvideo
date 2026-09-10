@@ -36,7 +36,8 @@ import {
   vehicleCanvasCache,
 } from "../utils/mediaPreloader";
 import { formatTime, getFadeOpacity } from "../utils/previewFormatters";
-import { drawCinematicPhotoOnCanvas, getCinematicEffect } from "../../CinematicEffects";
+import { getCinematicEffect } from "../../CinematicEffects";
+import { getTripPhotoTransition, resetTripTransitionCache } from "../transitions";
 
 interface UseVideoExportParams {
   locations: Location[];
@@ -107,6 +108,7 @@ export function useVideoExport({
     }
 
     try {
+      resetTripTransitionCache();
       setRecording(true);
       setRecordProgress(0);
       setTimelineElapsed(0);
@@ -556,22 +558,28 @@ export function useVideoExport({
             } else {
               const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
               const activeImg = preloadedImgs.get(activePhotoUrl);
+              const prevPhotoUrl = photoIdx > 0 ? arrivalImages[photoIdx - 1] || "" : "";
+              const prevImg = prevPhotoUrl ? preloadedImgs.get(prevPhotoUrl) || null : null;
               const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
               const photoEffectIndex = legIdx * 3 + photoIdx;
 
-              if (photoIdx > 0 && photoElapsed < 550) {
-                const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
-                const prevImg = preloadedImgs.get(prevPhotoUrl);
-                if (prevImg) {
-                  ctx.drawImage(prevImg, 0, 0, 1080, 1080);
-                }
-              }
+              const transition = getTripPhotoTransition(legIdx, photoIdx);
+              const transDuration = transition.durationMs || PHOTO_TRANSITION_MS;
+              const progress = Math.min(1, Math.max(0, photoElapsed / transDuration));
 
               if (activeImg) {
-                drawCinematicPhotoOnCanvas(ctx, activeImg, photoEffectIndex, photoIdx, photoElapsed);
+                transition.applyCanvas(progress, ctx, activeImg, prevImg, 1080, 1080);
               } else {
                 ctx.fillStyle = "#030e18";
                 ctx.fillRect(0, 0, 1080, 1080);
+              }
+
+              if (transition.hasFlashOverlay && photoElapsed < 100) {
+                const flashAlpha = (1 - photoElapsed / 100) * 0.35;
+                ctx.save();
+                ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
+                ctx.fillRect(0, 0, 1080, 1080);
+                ctx.restore();
               }
             }
 

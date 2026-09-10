@@ -211,6 +211,16 @@
   background: #06121d;
   will-change: opacity;
 }
+.arrival-photo-stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  perspective: 1200px;
+  perspective-origin: center center;
+  transform-style: preserve-3d;
+}
+
 .arrival-video-fullscreen {
   position: absolute;
   z-index: 70;
@@ -239,16 +249,236 @@
   background: #030e18;
 }
 @keyframes photoSlideFromLeft {
-  from { opacity: 0; transform: translateX(-40px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
 }
 @keyframes photoSlideFromRight {
-  from { opacity: 0; transform: translateX(40px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
 }
 @keyframes photoSlideFromTop {
-  from { opacity: 0; transform: translateY(-40px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { transform: translate3d(0, -100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoSlideFromBottom {
+  from { transform: translate3d(0, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoSlideFromTopLeft {
+  from { transform: translate3d(-100%, -100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoSlideFromTopRight {
+  from { transform: translate3d(100%, -100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoSlideFromBottomLeft {
+  from { transform: translate3d(-100%, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoSlideFromBottomRight {
+  from { transform: translate3d(100%, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoZoomInFade {
+  from { transform: scale(0.65); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes photoZoomOutFade {
+  from { transform: scale(1.35); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes photoKenBurnsPan {
+  from { transform: scale(1.14) translate3d(20px, 0, 0); opacity: 0; }
+  to { transform: scale(1.06) translate3d(0, 0, 0); opacity: 1; }
+}
+@keyframes photoCrossfade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes photoBlurCrossfade {
+  from { filter: blur(16px); opacity: 0; transform: scale(1.05); }
+  to { filter: blur(0); opacity: 1; transform: scale(1); }
+}
+@keyframes photoFadeThroughWhite {
+  0% { opacity: 0; filter: brightness(3); }
+  50% { opacity: 0.5; filter: brightness(2); }
+  100% { opacity: 1; filter: brightness(1); }
+}
+@keyframes photoFadeThroughBlack {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes photoPushLeft {
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoPushRight {
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoPushUp {
+  from { transform: translate3d(0, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoPushDown {
+  from { transform: translate3d(0, -100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes photoCubeRotateLeft {
+  from { transform: perspective(1200px) rotateY(90deg); transform-origin: right center; opacity: 0.3; }
+  to { transform: perspective(1200px) rotateY(0deg); transform-origin: right center; opacity: 1; }
+}
+@keyframes photoCubeRotateRight {
+  from { transform: perspective(1200px) rotateY(-90deg); transform-origin: left center; opacity: 0.3; }
+  to { transform: perspective(1200px) rotateY(0deg); transform-origin: left center; opacity: 1; }
+}
+@keyframes photoCubeRotateUp {
+  from { transform: perspective(1200px) rotateX(-90deg); transform-origin: center bottom; opacity: 0.3; }
+  to { transform: perspective(1200px) rotateX(0deg); transform-origin: center bottom; opacity: 1; }
+}
+@keyframes photoCubeRotateDown {
+  from { transform: perspective(1200px) rotateX(90deg); transform-origin: center top; opacity: 0.3; }
+  to { transform: perspective(1200px) rotateX(0deg); transform-origin: center top; opacity: 1; }
+}
+@keyframes photoFlipHorizontal {
+  from { transform: perspective(1000px) rotateY(180deg); opacity: 0; }
+  to { transform: perspective(1000px) rotateY(0deg); opacity: 1; }
+}
+@keyframes photoFlipVertical {
+  from { transform: perspective(1000px) rotateX(180deg); opacity: 0; }
+  to { transform: perspective(1000px) rotateX(0deg); opacity: 1; }
+}
+@keyframes photoTiltInFromLeft {
+  from { transform: perspective(1000px) translate3d(-60%, 0, 0) rotateY(-28deg) rotateZ(-6deg); opacity: 0; }
+  to { transform: perspective(1000px) translate3d(0, 0, 0) rotateY(0deg) rotateZ(0deg); opacity: 1; }
+}
+@keyframes photoTiltInFromRight {
+  from { transform: perspective(1000px) translate3d(60%, 0, 0) rotateY(28deg) rotateZ(6deg); opacity: 0; }
+  to { transform: perspective(1000px) translate3d(0, 0, 0) rotateY(0deg) rotateZ(0deg); opacity: 1; }
+}
+@keyframes photoDoorSwingOpen {
+  from { transform: perspective(1000px) rotateY(-90deg); transform-origin: left center; opacity: 0; }
+  to { transform: perspective(1000px) rotateY(0deg); transform-origin: left center; opacity: 1; }
+}
+@keyframes photoFoldReveal {
+  from { transform: perspective(800px) scaleX(0.1) rotateY(45deg); opacity: 0; }
+  to { transform: perspective(800px) scaleX(1) rotateY(0deg); opacity: 1; }
+}
+@keyframes photoCubeRotateLeftOut {
+  from { transform: perspective(1200px) rotateY(0deg); transform-origin: left center; opacity: 1; }
+  to { transform: perspective(1200px) rotateY(-90deg); transform-origin: left center; opacity: 0.2; }
+}
+@keyframes photoCubeRotateRightOut {
+  from { transform: perspective(1200px) rotateY(0deg); transform-origin: right center; opacity: 1; }
+  to { transform: perspective(1200px) rotateY(90deg); transform-origin: right center; opacity: 0.2; }
+}
+@keyframes photoCubeRotateUpOut {
+  from { transform: perspective(1200px) rotateX(0deg); transform-origin: center top; opacity: 1; }
+  to { transform: perspective(1200px) rotateX(90deg); transform-origin: center top; opacity: 0.2; }
+}
+@keyframes photoCubeRotateDownOut {
+  from { transform: perspective(1200px) rotateX(0deg); transform-origin: center bottom; opacity: 1; }
+  to { transform: perspective(1200px) rotateX(-90deg); transform-origin: center bottom; opacity: 0.2; }
+}
+@keyframes photoFlipHorizontalOut {
+  from { transform: perspective(1000px) rotateY(0deg); opacity: 1; }
+  to { transform: perspective(1000px) rotateY(-180deg); opacity: 0; }
+}
+@keyframes photoFlipVerticalOut {
+  from { transform: perspective(1000px) rotateX(0deg); opacity: 1; }
+  to { transform: perspective(1000px) rotateX(-180deg); opacity: 0; }
+}
+@keyframes photoDoorSwingOpenOut {
+  from { transform: perspective(1000px) rotateY(0deg); transform-origin: left center; opacity: 1; }
+  to { transform: perspective(1000px) rotateY(90deg); transform-origin: left center; opacity: 0.2; }
+}
+@keyframes photoPageCurlOut {
+  from { transform: perspective(1000px) rotateY(0deg); opacity: 1; }
+  to { transform: perspective(1000px) rotateY(-65deg) skewY(10deg); opacity: 0.2; }
+}
+@keyframes photoPageCurlReverseOut {
+  from { transform: perspective(1000px) rotateY(0deg); opacity: 1; }
+  to { transform: perspective(1000px) rotateY(65deg) skewY(-10deg); opacity: 0.2; }
+}
+@keyframes photoFoldRevealOut {
+  from { transform: perspective(800px) scaleX(1) rotateY(0deg); opacity: 1; }
+  to { transform: perspective(800px) scaleX(0.1) rotateY(-45deg); opacity: 0; }
+}
+@keyframes photoPushLeftOut {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-100%, 0, 0); }
+}
+@keyframes photoPushRightOut {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(100%, 0, 0); }
+}
+@keyframes photoPushUpOut {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, -100%, 0); }
+}
+@keyframes photoPushDownOut {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, 100%, 0); }
+}
+@keyframes photoPushZoomOutOut {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(1.3); opacity: 0; }
+}
+
+@keyframes photoWipeLeftToRight {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes photoWipeRightToLeft {
+  from { clip-path: inset(0 0 0 100%); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes photoWipeTopToBottom {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes photoWipeBottomToTop {
+  from { clip-path: inset(100% 0 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes photoWipeDiagonal {
+  from { clip-path: polygon(0 0, 0 0, 0 0); }
+  to { clip-path: polygon(0 0, 200% 0, 0 200%); }
+}
+@keyframes photoIrisWipeExpand {
+  from { clip-path: circle(0% at 50% 50%); }
+  to { clip-path: circle(85% at 50% 50%); }
+}
+@keyframes photoSplitReveal {
+  0% { clip-path: polygon(0 0, 100% 0, 100% 50%, 0 50%, 0 50%, 100% 50%, 100% 100%, 0 100%); }
+  100% { clip-path: polygon(0 0, 100% 0, 100% 0%, 0 0%, 0 100%, 100% 100%, 100% 100%, 0 100%); }
+}
+@keyframes photoGlitchCut {
+  0% { transform: translate3d(-12px, 4px, 0) skewX(-6deg); filter: hue-rotate(60deg) saturate(2); opacity: 0.8; }
+  35% { transform: translate3d(14px, -4px, 0) skewX(8deg); filter: hue-rotate(-90deg); opacity: 0.9; }
+  70% { transform: translate3d(-4px, 1px, 0); filter: none; opacity: 1; }
+  100% { transform: translate3d(0, 0, 0); filter: none; opacity: 1; }
+}
+@keyframes photoVhsStatic {
+  0% { transform: translate3d(10px, 0, 0); filter: contrast(1.5) saturate(1.8) hue-rotate(30deg); opacity: 0.8; }
+  40% { transform: translate3d(-10px, 0, 0); filter: contrast(1.3) hue-rotate(-30deg); opacity: 0.9; }
+  80% { transform: translate3d(3px, 0, 0); filter: none; opacity: 1; }
+  100% { transform: translate3d(0, 0, 0); filter: none; opacity: 1; }
+}
+@keyframes photoScanlineWipe {
+  0% { clip-path: inset(0 0 100% 0); opacity: 0.9; }
+  100% { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+@keyframes photoChromaticPulse {
+  0% { filter: drop-shadow(8px 0 0 rgba(255,0,0,0.7)) drop-shadow(-8px 0 0 rgba(0,255,255,0.7)); transform: scale(1.05); opacity: 0.5; }
+  50% { filter: drop-shadow(12px 0 0 rgba(255,0,0,0.5)) drop-shadow(-12px 0 0 rgba(0,255,255,0.5)); transform: scale(1.03); opacity: 0.85; }
+  100% { filter: none; transform: scale(1); opacity: 1; }
+}
+@keyframes photoPixelateDissolve {
+  0% { filter: blur(12px); opacity: 0.4; }
+  60% { filter: blur(4px); opacity: 0.85; }
+  100% { filter: blur(0); opacity: 1; }
 }
 @keyframes arrivalFlash {
   0% { opacity: 0.35; }
@@ -258,6 +488,7 @@
   0% { opacity: 0.35; }
   100% { opacity: 0; }
 }
+
 .arrival-flash-overlay,
 .micro-flash-overlay {
   position: absolute;

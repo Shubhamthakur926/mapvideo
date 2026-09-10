@@ -2,6 +2,7 @@ import mapboxgl from "mapbox-gl";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getLocationImages, type Location, type Transport } from "./types";
 import { createVehicle3DElement, updateVehicle3D } from "./Vehicle3D";
+import { getPhotoTransitionAnimation, CinematicPhotoOverlay, getCinematicEffect } from "./CinematicEffects";
 
 export interface MapboxGlobeHandle {
   getMap: () => mapboxgl.Map | null;
@@ -16,31 +17,12 @@ export interface MapboxGlobeHandle {
     pathFraction: number;
     legFraction: number;
   };
+  
+  renderFrame: (progress: number) => Promise<void>;
 }
 
-export const MAPBOX_TOKEN =
-  (import.meta as {
-    env?: {
-      VITE_MAPBOX_TOKEN?: string;
-      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
-      REACT_APP_MAPBOX_TOKEN?: string;
-    };
-  }).env?.VITE_MAPBOX_TOKEN ||
-  (import.meta as {
-    env?: {
-      VITE_MAPBOX_TOKEN?: string;
-      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
-      REACT_APP_MAPBOX_TOKEN?: string;
-    };
-  }).env?.NEXT_PUBLIC_MAPBOX_TOKEN ||
-  (import.meta as {
-    env?: {
-      VITE_MAPBOX_TOKEN?: string;
-      NEXT_PUBLIC_MAPBOX_TOKEN?: string;
-      REACT_APP_MAPBOX_TOKEN?: string;
-    };
-  }).env?.REACT_APP_MAPBOX_TOKEN ||
-  "";
+export const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || "";
+
 
 export type Props = {
   locations: Location[];
@@ -67,17 +49,10 @@ const vehicleMarks: Record<Transport, string> = {
   ship: "🚢",
 };
 
-const PHOTO_TRANSITION_MS = 480;
-
-function getPhotoTransitionAnimation(photoIndex: number): string {
-  const direction = (["Left", "Right", "Top"] as const)[photoIndex % 3];
-  return `photoSlideFrom${direction} ${PHOTO_TRANSITION_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards`;
-}
-
 // Fade envelope helper: ramps 0 -> 1 over the first `fadeIn` fraction of the
 // arrival showcase, then holds at 1 for the remainder. Used to smoothly fade
 // the full-screen arrival photo in as soon as the vehicle reaches a stop.
-function getArrivalFadeOpacity(fraction: number, fadeIn = 0.12): number {
+function getArrivalFadeOpacity(fraction: number, fadeIn = 0.01): number {
   if (fraction <= 0) return 0;
   if (fraction >= 1) return 1;
   if (fraction < fadeIn) return fraction / fadeIn;
@@ -516,7 +491,7 @@ export function formatDistanceKm(distanceKm: number): string {
     : Math.round(distanceKm).toLocaleString() + " km";
 }
 
-function getCinematicCamera(start: Location, end: Location, fraction: number, transport: Transport) {
+export function getCinematicCamera(start: Location, end: Location, fraction: number, transport: Transport) {
   const dist = calculateDistanceKm(start, end);
   const arc = Math.sin(fraction * Math.PI);
 
@@ -544,6 +519,7 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
     }
   }
 
+  // Ground, sea & road transport
   if (dist >= 2500) {
     return { zoom: 3.5, pitch: 35 };
   } else if (dist >= 1200) {
@@ -559,6 +535,142 @@ function getCinematicCamera(start: Location, end: Location, fraction: number, tr
   } else {
     return { zoom: 11.8, pitch: 52 };
   }
+}
+
+// ---------------------------------------------------------------------------
+// PURE FRAME COMPUTATION
+// ---------------------------------------------------------------------------
+// This used to live inline inside a `useMemo` in the component. It's now a
+// standalone, side-effect-free function of (locations, legs, legRoutes, progress)
+// so that BOTH the live-render `useMemo` AND the imperative `renderFrame`
+// (used during export) compute the exact same vehicle/camera state from the
+// exact same inputs — no React re-render round trip required for exports.
+export interface VehicleFrame {
+  currentPoint: { lat: number; lng: number } | null;
+  currentMark: string;
+  currentStop: Location | null;
+  activeLegIndex: number;
+  legFraction: number;
+  pathFraction: number;
+  bearing: number;
+  transport: Transport;
+  currentStart: Location;
+  currentEnd: Location;
+  isArrival: boolean;
+  arrivalStop: Location | null;
+  activePhotoIndex: number;
+  arrivalImages: string[];
+  arrivalShowcaseFraction: number;
+  tangentFrom: { lat: number; lng: number };
+  tangentTo: { lat: number; lng: number };
+}
+
+export function computeVehicleFrame(
+  locations: Location[],
+  legs: Transport[],
+  legRoutes: [number, number][][],
+  progress: number
+): VehicleFrame {
+  const totalLegs = Math.max(1, locations.length - 1);
+
+  if (locations.length < 2) {
+    const single = locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : { lat: 0, lng: 0 };
+    return {
+      currentPoint: locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : null,
+      currentMark: "✈️",
+      currentStop: locations[0] ?? null,
+      activeLegIndex: 0,
+      legFraction: 0,
+      pathFraction: 0,
+      bearing: 0,
+      transport: "flight",
+      currentStart: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
+      currentEnd: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
+      isArrival: false,
+      arrivalStop: null,
+      activePhotoIndex: 0,
+      arrivalImages: [],
+      arrivalShowcaseFraction: 0,
+      tangentFrom: single,
+      tangentTo: single,
+    };
+  }
+
+  const scaled = Math.min(totalLegs - 0.000001, Math.max(0, progress * totalLegs));
+  const legIdx = Math.floor(scaled);
+  const fraction = scaled - legIdx;
+
+  const start = locations[legIdx];
+  const end = locations[legIdx + 1] || locations[locations.length - 1];
+  const curTransport = legs[legIdx] ?? "flight";
+  const mark = vehicleMarks[curTransport] ?? "✈️";
+
+  const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
+
+  const TRAVEL_SPLIT = 0.55;
+  const arrivalActive = fraction >= TRAVEL_SPLIT;
+  const pathFraction = arrivalActive ? 1.0 : Math.min(1.0, fraction / TRAVEL_SPLIT);
+
+  const {
+    pt: point,
+    bearing: calculatedBearing,
+    tangentFrom: calcTangentFrom,
+    tangentTo: calcTangentTo,
+  } = getPointAlongPolyline(coords, pathFraction);
+  const activeDisplayStop = fraction < 0.35 ? start : end;
+
+  const arrivalShowcaseFraction = arrivalActive ? (fraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT) : 0;
+  const destImages = arrivalActive ? getLocationImages(end) : [];
+  const totalImgCount = Math.max(1, destImages.length);
+  const photoIdx = Math.min(totalImgCount - 1, Math.floor(arrivalShowcaseFraction * totalImgCount));
+
+  return {
+    currentPoint: arrivalActive ? { lat: end.lat, lng: end.lng } : point,
+    currentMark: mark,
+    currentStop: activeDisplayStop,
+    activeLegIndex: legIdx,
+    legFraction: fraction,
+    pathFraction,
+    bearing: calculatedBearing,
+    transport: curTransport,
+    currentStart: start,
+    currentEnd: end,
+    isArrival: arrivalActive,
+    arrivalStop: arrivalActive ? end : null,
+    activePhotoIndex: photoIdx,
+    arrivalImages: destImages,
+    arrivalShowcaseFraction,
+    tangentFrom: calcTangentFrom,
+    tangentTo: calcTangentTo,
+  };
+}
+
+// Project the tangent segment (tangentFrom -> tangentTo) through the live map
+// to get the ON-SCREEN heading. A flat compass bearing computed straight
+// from lng/lat does NOT reliably match what's rendered on a "globe"
+// projection map (especially near the poles), so we always prefer this when
+// a map instance is available.
+function computeScreenBearing(
+  map: mapboxgl.Map | null,
+  tangentFrom: { lat: number; lng: number },
+  tangentTo: { lat: number; lng: number },
+  fallbackBearing: number
+): number {
+  if (!map) return fallbackBearing;
+  const distLngLat = Math.hypot(tangentTo.lng - tangentFrom.lng, tangentTo.lat - tangentFrom.lat);
+  if (distLngLat <= 1e-9) return fallbackBearing;
+  try {
+    const screenA = map.project([tangentFrom.lng, tangentFrom.lat]);
+    const screenB = map.project([tangentTo.lng, tangentTo.lat]);
+    const dx = screenB.x - screenA.x;
+    const dy = screenB.y - screenA.y;
+    if (Math.hypot(dx, dy) > 0.5) {
+      return ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+    }
+  } catch {
+    // map.project can throw if called before the map is fully ready.
+  }
+  return fallbackBearing;
 }
 
 export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxGlobe(
@@ -600,6 +712,13 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
     }
     return initial;
   });
+  // Keep a ref mirror of legRoutes so the imperative renderFrame() (used
+  // during export) always reads the latest fetched routes without needing
+  // to be re-created every time legRoutes changes.
+  const legRoutesRef = useRef(legRoutes);
+  useEffect(() => {
+    legRoutesRef.current = legRoutes;
+  }, [legRoutes]);
 
   useEffect(() => {
     let active = true;
@@ -637,78 +756,10 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
     pathFraction,
     tangentFrom,
     tangentTo,
-  } = useMemo(() => {
-    if (locations.length < 2) {
-      const single = locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : { lat: 0, lng: 0 };
-      return {
-        currentPoint: locations[0] ? { lat: locations[0].lat, lng: locations[0].lng } : null,
-        currentMark: "✈️",
-        currentStop: locations[0],
-        activeLegIndex: 0,
-        legFraction: 0,
-        pathFraction: 0,
-        bearing: 0,
-        transport: "flight" as Transport,
-        currentStart: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
-        currentEnd: locations[0] || { id: "0", name: "", country: "", code: "", lat: 0, lng: 0 },
-        isArrival: false,
-        arrivalStop: null,
-        activePhotoIndex: 0,
-        arrivalImages: [],
-        arrivalShowcaseFraction: 0,
-        tangentFrom: single,
-        tangentTo: single,
-      };
-    }
-
-    const scaled = Math.min(totalLegs - 0.000001, Math.max(0, currentProgress * totalLegs));
-    const legIdx = Math.floor(scaled);
-    const fraction = scaled - legIdx;
-
-    const start = locations[legIdx];
-    const end = locations[legIdx + 1] || locations[locations.length - 1];
-    const curTransport = legs[legIdx] ?? "flight";
-    const mark = vehicleMarks[curTransport] ?? "✈️";
-
-    const coords = legRoutes[legIdx] || getLegCoordinates(start, end, curTransport);
-
-    const TRAVEL_SPLIT = 0.55;
-    const arrivalActive = fraction >= TRAVEL_SPLIT;
-    const pathFraction = arrivalActive ? 1.0 : Math.min(1.0, fraction / TRAVEL_SPLIT);
-
-    const {
-      pt: point,
-      bearing: calculatedBearing,
-      tangentFrom: calcTangentFrom,
-      tangentTo: calcTangentTo,
-    } = getPointAlongPolyline(coords, pathFraction);
-    const activeDisplayStop = fraction < 0.35 ? start : end;
-
-    const arrivalShowcaseFraction = arrivalActive ? (fraction - TRAVEL_SPLIT) / (1 - TRAVEL_SPLIT) : 0;
-    const destImages = arrivalActive ? getLocationImages(end) : [];
-    const totalImgCount = Math.max(1, destImages.length);
-    const photoIdx = Math.min(totalImgCount - 1, Math.floor(arrivalShowcaseFraction * totalImgCount));
-
-    return {
-      currentPoint: arrivalActive ? { lat: end.lat, lng: end.lng } : point,
-      currentMark: mark,
-      currentStop: activeDisplayStop,
-      activeLegIndex: legIdx,
-      legFraction: fraction,
-      pathFraction,
-      bearing: calculatedBearing,
-      transport: curTransport,
-      currentStart: start,
-      currentEnd: end,
-      isArrival: arrivalActive,
-      arrivalStop: arrivalActive ? end : null,
-      activePhotoIndex: photoIdx,
-      arrivalImages: destImages,
-      arrivalShowcaseFraction,
-      tangentFrom: calcTangentFrom,
-      tangentTo: calcTangentTo,
-    };
-  }, [totalLegs, currentProgress, legs, locations, legRoutes]);
+  } = useMemo(
+    () => computeVehicleFrame(locations, legs, legRoutes, currentProgress),
+    [totalLegs, currentProgress, legs, locations, legRoutes]
+  );
 
   useEffect(() => {
     if (!mapContainerRef.current || !MAPBOX_TOKEN) return;
@@ -728,6 +779,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
       antialias: true,
       preserveDrawingBuffer: true,
       maxZoom: 12,
+      maxTileCacheSize: 200,
       renderWorldCopies: false,
     });
 
@@ -761,9 +813,22 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
             "line-color": "#0284c7",
-            "line-width": 8,
-            "line-opacity": 0.6,
-            "line-blur": 4,
+            "line-width": 12,
+            "line-opacity": 0.75,
+            "line-blur": 6,
+          },
+        });
+
+        map.addLayer({
+          id: "journey-route-line-neon",
+          type: "line",
+          source: "journey-route-base",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#38bdf8",
+            "line-width": 5,
+            "line-opacity": 0.95,
+            "line-blur": 2,
           },
         });
 
@@ -773,9 +838,9 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           source: "journey-route-base",
           layout: { "line-cap": "round", "line-join": "round" },
           paint: {
-            "line-color": "#38bdf8",
-            "line-width": 3.5,
-            "line-opacity": 0.9,
+            "line-color": "#ffffff",
+            "line-width": 2,
+            "line-opacity": 1.0,
           },
         });
       }
@@ -1095,30 +1160,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
       vMarker.getElement().style.display = showVehicle ? "flex" : "none";
     }
     if (vehicleIconRef.current) {
-      // NOTE (fix): don't trust the raw geographic bearing directly — on a
-      // "globe" projection, flat lng/lat compass bearing can diverge sharply
-      // from what's actually drawn on screen (most visible at high
-      // latitudes, e.g. near Greenland/Iceland, where meridians converge).
-      // Instead, project the tangent segment (tangentFrom -> tangentTo)
-      // through the live map to get real screen pixels, then derive the
-      // heading from those — this always matches the rendered route line,
-      // regardless of projection/pitch/latitude.
-      let screenBearing = bearing;
-      const distLngLat = Math.hypot(tangentTo.lng - tangentFrom.lng, tangentTo.lat - tangentFrom.lat);
-      if (distLngLat > 1e-9) {
-        try {
-          const screenA = map.project([tangentFrom.lng, tangentFrom.lat]);
-          const screenB = map.project([tangentTo.lng, tangentTo.lat]);
-          const dx = screenB.x - screenA.x;
-          const dy = screenB.y - screenA.y;
-          if (Math.hypot(dx, dy) > 0.5) {
-            screenBearing = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
-          }
-        } catch {
-          // map.project can throw if called before the map is fully ready;
-          // fall back to the geographic bearing in that case.
-        }
-      }
+      const screenBearing = computeScreenBearing(map, tangentFrom, tangentTo, bearing);
 
       updateVehicle3D(vehicleIconRef.current, transport, screenBearing, {
         pathFraction,
@@ -1155,7 +1197,6 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
         Math.min(1, legFraction / 0.55),
         transport
       );
-
       if (playing) {
         if (isRecording) {
           map.jumpTo({
@@ -1178,43 +1219,124 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
     }
   }, [currentPoint, bearing, currentMark, transport, playing, currentStart, currentEnd, legFraction, pathFraction, isArrival, locations, showVehicle, tangentFrom, tangentTo, isRecording]);
 
+  const lastFrameDataRef = useRef<VehicleFrame | null>(null);
+
   useImperativeHandle(
     ref,
     () => {
-      const map = mapRef.current;
-      let screenBearing = bearing;
-      if (map) {
-        const distLngLat = Math.hypot(tangentTo.lng - tangentFrom.lng, tangentTo.lat - tangentFrom.lat);
-        if (distLngLat > 1e-9) {
-          try {
-            const screenA = map.project([tangentFrom.lng, tangentFrom.lat]);
-            const screenB = map.project([tangentTo.lng, tangentTo.lat]);
-            const dx = screenB.x - screenA.x;
-            const dy = screenB.y - screenA.y;
-            if (Math.hypot(dx, dy) > 0.5) {
-              screenBearing = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
-            }
-          } catch {
-            // fallback to bearing
-          }
-        }
-      }
       return {
         getMap: () => mapRef.current,
-        getVehicleState: () => ({
-          point: currentPoint,
-          bearing,
-          screenBearing,
-          transport,
-          isArrival,
-          arrivalStop,
-          currentStop,
-          pathFraction,
-          legFraction,
-        }),
+        getVehicleState: () => {
+          const map = mapRef.current;
+          const activeData = lastFrameDataRef.current ?? {
+            currentPoint,
+            bearing,
+            tangentFrom,
+            tangentTo,
+            transport,
+            isArrival,
+            arrivalStop,
+            currentStop,
+            pathFraction,
+            legFraction,
+          };
+          const screenBearing = computeScreenBearing(map, activeData.tangentFrom, activeData.tangentTo, activeData.bearing);
+          return {
+            point: activeData.currentPoint,
+            bearing: activeData.bearing,
+            screenBearing,
+            transport: activeData.transport,
+            isArrival: activeData.isArrival,
+            arrivalStop: activeData.arrivalStop,
+            currentStop: activeData.currentStop,
+            pathFraction: activeData.pathFraction,
+            legFraction: activeData.legFraction,
+          };
+        },
+        // See MapboxGlobeHandle.renderFrame doc comment above for the full
+        // rationale. Short version: drive the map + vehicle DIRECTLY from a
+        // caller-supplied `progress`, skip React state entirely, and only
+        // resolve once Mapbox confirms the frame is actually painted. This
+        // is what makes exported video (especially flight legs, whose
+        // zoom/pitch/altitude change every frame) render jerk-free.
+        renderFrame: async (progressValue: number) => {
+          const map = mapRef.current;
+          if (!map || locations.length < 2) return;
+
+          const frameData = computeVehicleFrame(locations, legs, legRoutesRef.current, progressValue);
+          lastFrameDataRef.current = frameData;
+
+          const {
+            currentPoint: framePoint,
+            currentStart: frameStart,
+            currentEnd: frameEnd,
+            transport: frameTransport,
+            legFraction: frameLegFraction,
+            pathFraction: framePathFraction,
+            isArrival: frameIsArrival,
+            tangentFrom: frameTangentFrom,
+            tangentTo: frameTangentTo,
+            bearing: frameBearing,
+          } = frameData;
+
+          if (!framePoint) return;
+
+          if (vehicleMarkerRef.current) {
+            vehicleMarkerRef.current.setLngLat([framePoint.lng, framePoint.lat]);
+          }
+
+          const screenBearing = computeScreenBearing(map, frameTangentFrom, frameTangentTo, frameBearing);
+
+          if (vehicleIconRef.current) {
+            updateVehicle3D(vehicleIconRef.current, frameTransport, screenBearing, {
+              pathFraction: framePathFraction,
+              legFraction: frameLegFraction,
+              isArrival: frameIsArrival,
+              isPlaying: true,
+            });
+          }
+
+          if (frameIsArrival) {
+            map.jumpTo({
+              center: [frameEnd.lng, frameEnd.lat],
+              zoom: 7.0,
+              pitch: 42,
+              bearing: 0,
+            });
+          } else {
+            const { zoom: targetZoom, pitch: targetPitch } = getCinematicCamera(
+              frameStart,
+              frameEnd,
+              Math.min(1, frameLegFraction / 0.55),
+              frameTransport
+            );
+            map.jumpTo({
+              center: [framePoint.lng, framePoint.lat],
+              zoom: targetZoom,
+              pitch: targetPitch,
+              bearing: 0,
+            });
+          }
+
+          // The crucial fix: wait for Mapbox's OWN render event before
+          // returning, so whoever calls renderFrame() knows the canvas is
+          // guaranteed to reflect this exact progress value before they
+          // capture it.
+          await new Promise<void>((resolve) => {
+            let done = false;
+            const finish = () => {
+              if (!done) {
+                done = true;
+                resolve();
+              }
+            };
+            map.once("render", finish);
+            setTimeout(finish, 25);
+          });
+        },
       };
     },
-    [currentPoint, bearing, transport, isArrival, arrivalStop, currentStop, pathFraction, legFraction, tangentFrom, tangentTo]
+    [currentPoint, bearing, transport, isArrival, arrivalStop, currentStop, pathFraction, legFraction, tangentFrom, tangentTo, locations, legs]
   );
 
   useEffect(() => {
@@ -1418,10 +1540,10 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
         </div>
       )}
 
-      {/* Full-screen arrival photo showcase with directional transitions
+      {/* Full-screen arrival photo showcase with fade-in and crossfade transitions
           (replaces the old floating summary card entirely — no box, no grid,
           no thumbnails: the photo itself fills the frame). */}
-      {!hideOverlays && isArrival && arrivalStop && (
+      {!hideOverlays && isArrival && arrivalStop && !arrivalStop.videoUrl && (
         <div
           style={{
             position: "absolute",
@@ -1433,25 +1555,30 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           }}
         >
           {arrivalImages.length > 0 ? (
-            arrivalImages.map((imgUrl, idx) => (
-              <img
-                key={imgUrl + idx}
-                src={imgUrl}
-                alt={`${arrivalStop.name} photo ${idx + 1}`}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  display: idx === activePhotoIndex || idx === activePhotoIndex - 1 ? "block" : "none",
-                  zIndex: idx === activePhotoIndex ? 2 : 1,
-                  animation: idx === activePhotoIndex ? getPhotoTransitionAnimation(activePhotoIndex) : "none",
-                }}
-              />
-            ))
+            arrivalImages.map((imgUrl, idx) => {
+              const isCurrent = idx === activePhotoIndex;
+              const isPrevious = idx === activePhotoIndex - 1;
+              if (!isCurrent && !isPrevious) return null;
+              return (
+                <img
+                  key={`${imgUrl}-${activeLegIndex}-${idx}-${isCurrent ? activePhotoIndex : "prev"}`}
+                  src={imgUrl}
+                  alt={`${arrivalStop.name} photo ${idx + 1}`}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    zIndex: isCurrent ? 2 : 1,
+                    animation: isCurrent ? getPhotoTransitionAnimation(activeLegIndex * 3 + idx, idx) : "none",
+                  }}
+                />
+              );
+            })
           ) : arrivalStop.imageUrl ? (
             <img
+              key={`stop-${arrivalStop.name}-${activeLegIndex}`}
               src={arrivalStop.imageUrl}
               alt={arrivalStop.name}
               style={{
@@ -1460,10 +1587,16 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
-                animation: getPhotoTransitionAnimation(0),
+                animation: getPhotoTransitionAnimation(activeLegIndex * 3, 0),
               }}
             />
           ) : null}
+
+          {/* Transient cinematic transition overlay that fades out quickly */}
+          <CinematicPhotoOverlay
+            key={`globe-effect-${activeLegIndex}-${activePhotoIndex}`}
+            effectIndex={activeLegIndex * 3 + activePhotoIndex}
+          />
 
           {/* Soft bottom gradient so the caption stays readable over any photo */}
           <div
@@ -1474,6 +1607,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
               right: 0,
               padding: "56px 32px 28px",
               background: "linear-gradient(to top, rgba(3, 16, 29, 0.92) 0%, rgba(3, 16, 29, 0) 100%)",
+              zIndex: 6,
             }}
           >
             <div
@@ -1507,6 +1641,16 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
             <div style={{ fontSize: "13px", color: "#cbd5e1", marginTop: "4px" }}>
               {arrivalStop.country} · {arrivalStop.code}
               {arrivalImages.length > 0 && ` · Photo ${activePhotoIndex + 1} of ${arrivalImages.length}`}
+            </div>
+            <div
+              className="cinematic-effect-badge"
+              style={{ borderColor: getCinematicEffect(activeLegIndex * 3 + activePhotoIndex).accentColor, marginTop: "8px" }}
+            >
+              <span
+                className="badge-dot"
+                style={{ backgroundColor: getCinematicEffect(activeLegIndex * 3 + activePhotoIndex).accentColor }}
+              />
+              <span>{getCinematicEffect(activeLegIndex * 3 + activePhotoIndex).badge}</span>
             </div>
           </div>
         </div>

@@ -5,6 +5,7 @@ import { calculateDistanceKm, formatDistanceKm, MapboxGlobe, type MapboxGlobeHan
 import { RouteOverviewMap, type RouteOverviewMapHandle } from "./RouteOverviewMap";
 import { getLocationImages, getLocationVideo, type Location, type Transport } from "./types";
 import { vehicleSvgTemplates } from "./Vehicle3D";
+import { CinematicPhotoOverlay, getCinematicEffect, getPhotoTransitionAnimation } from "./CinematicEffects";
 import "./map-video.css";
 import "./video-controls.css";
 
@@ -24,15 +25,18 @@ const BACKGROUND_MUSIC_URL = "/sounds/background.mp3";
 const BACKGROUND_MUSIC_VOLUME = 0.6;
 const BACKGROUND_MUSIC_DUCK_VOLUME = 0.15;
 const BRAND_LOGO_URL = "/picture/App-logo.png";
+const INTRO_VIDEO_URL = "/videos/intro.mp4";
+const DEFAULT_INTRO_DURATION_MS = 6500;
 
 // Stage Durations
-const INTRO_DURATION_MS = 2500;
 const SUMMARY_DURATION_MS = 3600;
 const OUTRO_DURATION_MS = 2500;
 const FADE_TRANSITION_MS = 500;
 const VEHICLE_LEG_DURATION_MS = 4000;
 const PHOTO_DURATION_MS = 2000;
-const PHOTO_TRANSITION_MS = 480;
+// First show the cinematic overlay on a soft/blurry photo, then reveal the
+// untouched sharp photo beneath it.
+const PHOTO_TRANSITION_MS = 1000;
 const ROUTE_MAP_DURATION_MS = 3200;
 const COLLAGE_DURATION_MS = 8000;
 const COLLAGE_ENTRY_DURATION_MS = 800;
@@ -182,15 +186,244 @@ function getFadeOpacity(
   return 1;
 }
 
-type PhotoTransitionDirection = "left" | "right" | "top";
 
-function getPhotoTransitionDirection(photoIndex: number): PhotoTransitionDirection {
-  return (["left", "right", "top"] as const)[photoIndex % 3];
-}
 
-function getPhotoTransitionAnimation(photoIndex: number): string {
-  const direction = getPhotoTransitionDirection(photoIndex);
-  return `photoSlideFrom${direction[0].toUpperCase()}${direction.slice(1)} ${PHOTO_TRANSITION_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards`;
+function drawCinematicPhotoOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  effectIndex: number,
+  photoIndex: number,
+  elapsed: number
+) {
+  const effect = getCinematicEffect(effectIndex);
+  const duration = effect.isSimple ? 550 : 1100;
+  const progress = Math.min(1, Math.max(0, elapsed / duration));
+  const isTransitioning = progress < 1;
+
+  ctx.save();
+
+  if (effect.isSimple) {
+    // Pure natural clean photo slide (no blur, no filter)
+    const direction = photoIndex % 3; // 0: left, 1: right, 2: top
+    const ease = 1 - Math.pow(1 - progress, 3);
+    const offset = (1 - ease) * 45;
+    const dx = direction === 0 ? -offset : direction === 1 ? offset : 0;
+    const dy = direction === 2 ? -offset : 0;
+    ctx.globalAlpha = Math.min(1, progress * 2.5);
+    ctx.filter = "none";
+    ctx.drawImage(img, dx, dy, 1080, 1080);
+    ctx.restore();
+    return;
+  }
+
+  // Animated Transitions
+  const easeOut = 1 - Math.pow(1 - progress, 3);
+  const remaining = 1 - easeOut;
+
+  let filterStr = "none";
+  let scale = 1;
+  let rotate = 0;
+  let translateX = 0;
+  let translateY = 0;
+
+  switch (effect.id) {
+    case "glass-blur": {
+      const blurPx = Math.max(0, remaining * 45);
+      const bright = 1 + remaining * 0.4;
+      const contrast = 1 + remaining * 0.15;
+      filterStr = `blur(${blurPx.toFixed(1)}px) brightness(${bright.toFixed(2)}) contrast(${contrast.toFixed(2)})`;
+      scale = 1 + remaining * 0.24;
+      break;
+    }
+    case "zoom-blur": {
+      const blurPx = Math.max(0, remaining * 38);
+      const contrast = 1 + remaining * 0.45;
+      const sat = 1 + remaining * 0.5;
+      filterStr = `blur(${blurPx.toFixed(1)}px) contrast(${contrast.toFixed(2)}) saturate(${sat.toFixed(2)})`;
+      scale = 1 + remaining * 0.45;
+      rotate = (remaining * -3 * Math.PI) / 180;
+      break;
+    }
+    case "flash-burst": {
+      const flashFade = Math.min(1, elapsed / 850);
+      const flashRem = Math.pow(1 - flashFade, 2);
+      const blurPx = Math.max(0, flashRem * 22);
+      const bright = 1 + flashRem * 4.8;
+      const contrast = 1 + flashRem * 0.9;
+      filterStr = `blur(${blurPx.toFixed(1)}px) brightness(${bright.toFixed(2)}) contrast(${contrast.toFixed(2)})`;
+      scale = 1 + flashRem * 0.2;
+      break;
+    }
+    case "motion-blur": {
+      const motionFade = Math.min(1, elapsed / 950);
+      const motionRem = 1 - (1 - Math.pow(1 - motionFade, 3));
+      const blurPx = Math.max(0, motionRem * 36);
+      filterStr = `blur(${blurPx.toFixed(1)}px) brightness(${(1 + motionRem * 0.25).toFixed(2)})`;
+      translateX = -130 * motionRem;
+      scale = 1 + motionRem * 0.2;
+      break;
+    }
+    case "light-sweep": {
+      const blurPx = Math.max(0, remaining * 32);
+      const bright = 1 + remaining * 0.9;
+      const sat = 1 + remaining * 0.65;
+      filterStr = `blur(${blurPx.toFixed(1)}px) brightness(${bright.toFixed(2)}) saturate(${sat.toFixed(2)})`;
+      scale = 1 + remaining * 0.22;
+      break;
+    }
+    case "film-burn": {
+      const blurPx = Math.max(0, remaining * 34);
+      const sep = remaining * 0.75;
+      const sat = 1 + remaining * 1.5;
+      const bright = 1 + remaining * 0.65;
+      filterStr = `blur(${blurPx.toFixed(1)}px) sepia(${sep.toFixed(2)}) saturate(${sat.toFixed(2)}) brightness(${bright.toFixed(2)})`;
+      scale = 1 + remaining * 0.22;
+      break;
+    }
+    case "bokeh-bloom": {
+      const blurPx = Math.max(0, remaining * 42);
+      const sat = 1 + remaining * 1.4;
+      const bright = 1 + remaining * 0.5;
+      filterStr = `blur(${blurPx.toFixed(1)}px) saturate(${sat.toFixed(2)}) brightness(${bright.toFixed(2)})`;
+      scale = 1 + remaining * 0.26;
+      break;
+    }
+    case "glitch-shutter": {
+      const blurPx = Math.max(0, remaining * 24);
+      const contrast = 1 + remaining * 0.75;
+      const hue = remaining * 60;
+      filterStr = `blur(${blurPx.toFixed(1)}px) contrast(${contrast.toFixed(2)}) hue-rotate(${hue.toFixed(0)}deg)`;
+      scale = 1 + remaining * 0.2;
+      break;
+    }
+    default: {
+      const blurPx = Math.max(0, remaining * 36);
+      filterStr = `blur(${blurPx.toFixed(1)}px)`;
+      scale = 1 + remaining * 0.2;
+      break;
+    }
+  }
+
+  // Draw the transformed image with filter
+  ctx.filter = filterStr;
+  ctx.translate(540 + translateX, 540 + translateY);
+  ctx.rotate(rotate);
+  ctx.scale(scale, scale);
+  ctx.drawImage(img, -540, -540, 1080, 1080);
+  ctx.restore();
+
+  // Reset filter for overlays
+  ctx.save();
+  ctx.filter = "none";
+
+  // Draw transient animated overlays (< duration)
+  if (isTransitioning) {
+    const fade = Math.max(0, 1 - progress);
+    ctx.globalCompositeOperation = "screen";
+
+    if (effect.id === "glass-blur") {
+      const ringRadius = 140 + progress * 160;
+      ctx.beginPath();
+      ctx.arc(540, 500, ringRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 * fade})`;
+      ctx.lineWidth = 10;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(540, 500, ringRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.85 * fade})`;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      const glassBloom = ctx.createRadialGradient(540, 500, 20, 540, 500, 700);
+      glassBloom.addColorStop(0, `rgba(255, 255, 255, ${0.4 * fade})`);
+      glassBloom.addColorStop(0.5, `rgba(56, 189, 248, ${0.2 * fade})`);
+      glassBloom.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = glassBloom;
+      ctx.fillRect(0, 0, 1080, 1080);
+    } else if (effect.id === "zoom-blur") {
+      const vig = ctx.createRadialGradient(540, 540, 250, 540, 540, 780);
+      vig.addColorStop(0, "rgba(168, 85, 247, 0)");
+      vig.addColorStop(0.7, `rgba(168, 85, 247, ${0.4 * fade})`);
+      vig.addColorStop(1, `rgba(168, 85, 247, ${0.75 * fade})`);
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, 1080, 1080);
+    } else if (effect.id === "flash-burst") {
+      const flashHalo = ctx.createRadialGradient(540, 540, 0, 540, 540, 450 + progress * 350);
+      flashHalo.addColorStop(0, `rgba(255, 255, 255, ${0.95 * fade})`);
+      flashHalo.addColorStop(0.35, `rgba(255, 245, 200, ${0.6 * fade})`);
+      flashHalo.addColorStop(0.75, `rgba(255, 220, 150, ${0.25 * fade})`);
+      flashHalo.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = flashHalo;
+      ctx.fillRect(0, 0, 1080, 1080);
+    } else if (effect.id === "motion-blur") {
+      const streak = ctx.createLinearGradient(0, 0, 1080, 0);
+      streak.addColorStop(0, `rgba(249, 115, 22, ${0.45 * fade})`);
+      streak.addColorStop(0.4, `rgba(255, 255, 255, ${0.4 * fade})`);
+      streak.addColorStop(0.8, `rgba(249, 115, 22, ${0.2 * fade})`);
+      streak.addColorStop(1, "rgba(249, 115, 22, 0)");
+      ctx.fillStyle = streak;
+      ctx.fillRect(0, 0, 1080, 1080);
+    } else if (effect.id === "light-sweep") {
+      const sweepX = -450 + progress * 2000;
+      const sweep = ctx.createLinearGradient(sweepX - 220, 0, sweepX + 220, 1080);
+      sweep.addColorStop(0, "rgba(253, 224, 71, 0)");
+      sweep.addColorStop(0.45, `rgba(253, 224, 71, ${0.5 * fade})`);
+      sweep.addColorStop(0.5, `rgba(255, 255, 255, ${0.95 * fade})`);
+      sweep.addColorStop(0.55, `rgba(253, 224, 71, ${0.5 * fade})`);
+      sweep.addColorStop(1, "rgba(253, 224, 71, 0)");
+      ctx.fillStyle = sweep;
+      ctx.fillRect(0, 0, 1080, 1080);
+    } else if (effect.id === "film-burn") {
+      const filmLeak = ctx.createLinearGradient(0, 0, 1080, 1080);
+      filmLeak.addColorStop(0, `rgba(245, 158, 11, ${0.65 * fade})`);
+      filmLeak.addColorStop(0.35, `rgba(239, 68, 68, ${0.4 * fade})`);
+      filmLeak.addColorStop(0.7, "rgba(245, 158, 11, 0)");
+      ctx.fillStyle = filmLeak;
+      ctx.fillRect(0, 0, 1080, 1080);
+
+      // Sparks
+      for (const [x, y, r] of [[180, 200, 110], [880, 420, 140], [280, 780, 90]] as const) {
+        const spark = ctx.createRadialGradient(x, y, 0, x, y, r);
+        spark.addColorStop(0, `rgba(255, 240, 180, ${0.85 * fade})`);
+        spark.addColorStop(0.5, `rgba(245, 158, 11, ${0.45 * fade})`);
+        spark.addColorStop(1, "rgba(245, 158, 11, 0)");
+        ctx.fillStyle = spark;
+        ctx.fillRect(0, 0, 1080, 1080);
+      }
+    } else if (effect.id === "bokeh-bloom") {
+      for (const [x, y, radius] of [
+        [240, 240, 110],
+        [850, 360, 130],
+        [380, 720, 95],
+        [780, 180, 85],
+        [720, 780, 105],
+        [160, 560, 100],
+      ] as const) {
+        const bokeh = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        bokeh.addColorStop(0, `rgba(255, 235, 140, ${0.85 * fade})`);
+        bokeh.addColorStop(0.45, `rgba(251, 191, 36, ${0.45 * fade})`);
+        bokeh.addColorStop(1, "rgba(251, 191, 36, 0)");
+        ctx.fillStyle = bokeh;
+        ctx.fillRect(0, 0, 1080, 1080);
+      }
+    } else if (effect.id === "glitch-shutter") {
+      const glitchGrad = ctx.createLinearGradient(0, 0, 1080, 0);
+      glitchGrad.addColorStop(0, `rgba(6, 182, 212, ${0.4 * fade})`);
+      glitchGrad.addColorStop(0.5, `rgba(236, 72, 153, ${0.3 * fade})`);
+      glitchGrad.addColorStop(1, `rgba(59, 130, 246, ${0.4 * fade})`);
+      ctx.fillStyle = glitchGrad;
+      ctx.fillRect(0, 0, 1080, 1080);
+
+      // Scanlines
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.12 * fade})`;
+      for (let y = 0; y < 1080; y += 6) {
+        ctx.fillRect(0, y, 1080, 2);
+      }
+    }
+  }
+
+  ctx.restore();
 }
 
 // Canvas drawing helper for rounded rectangles
@@ -795,13 +1028,18 @@ async function preloadImages(urls: string[]): Promise<Map<string, HTMLImageEleme
               resolve();
             }
           };
-          const timer = setTimeout(finish, 2500);
+          // Canvas export cannot use a photo until it is fully decoded. A short
+          // timeout previously let recording begin with missing photos, which
+          // made the downloaded video show the black fallback frame.
+          const timer = setTimeout(finish, 15000);
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.onload = () => {
             clearTimeout(timer);
-            map.set(url, img);
-            finish();
+            void img.decode().catch(() => undefined).finally(() => {
+              map.set(url, img);
+              finish();
+            });
           };
           img.onerror = () => {
             clearTimeout(timer);
@@ -882,6 +1120,28 @@ export function PreviewModal({
   const [muted, setMuted] = useState(false);
   const [unavailableVideos, setUnavailableVideos] = useState<string[]>([]);
   const [clipDurations, setClipDurations] = useState<Record<string, number>>({});
+  const [introDurationMs, setIntroDurationMs] = useState<number>(DEFAULT_INTRO_DURATION_MS);
+  const introVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const media = document.createElement("video");
+    media.preload = "metadata";
+    media.src = INTRO_VIDEO_URL;
+    const updateDuration = () => {
+      if (Number.isFinite(media.duration) && media.duration > 0) {
+        setIntroDurationMs(Math.round(media.duration * 1000));
+      }
+    };
+    media.addEventListener("loadedmetadata", updateDuration);
+    media.load();
+    return () => {
+      media.removeEventListener("loadedmetadata", updateDuration);
+      media.removeAttribute("src");
+      media.load();
+    };
+  }, []);
+
+  const INTRO_DURATION_MS = introDurationMs;
 
   // Collect all unique photos from all locations
   const allPhotos = useMemo(() => {
@@ -973,7 +1233,7 @@ export function PreviewModal({
   const currentBatchIndex = 0;
   const batchTransitionProgress = 0;
 
-  const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS) : 0;
+  const introOpacity = isIntro ? getFadeOpacity(timelineElapsed, INTRO_DURATION_MS, 0, 400) : 0;
   const routeMapOpacity = isRouteMap ? getFadeOpacity(timelineElapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS) : 0;
   const summaryOpacity = isSummary ? getFadeOpacity(timelineElapsed - summaryStartTime, SUMMARY_DURATION_MS) : 0;
   const collageOpacity = isCollage ? getFadeOpacity(collageElapsed, COLLAGE_TOTAL_DURATION) : 0;
@@ -1003,7 +1263,7 @@ export function PreviewModal({
   const isMediaShowcase = isArrivalPhase;
   const arrivalMediaDuration = Math.max(0, (activeSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
   const arrivalMediaOpacity = isArrivalPhase
-    ? getFadeOpacity(elapsedInLeg - VEHICLE_LEG_DURATION_MS, arrivalMediaDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
+    ? getFadeOpacity(elapsedInLeg - VEHICLE_LEG_DURATION_MS, arrivalMediaDuration, 50, FADE_TRANSITION_MS)
     : 0;
   const travelProgress = Math.min(1, elapsedInLeg / VEHICLE_LEG_DURATION_MS);
   const photoElapsedInLeg = Math.max(0, elapsedInLeg - VEHICLE_LEG_DURATION_MS - videoDurationMs);
@@ -1104,12 +1364,35 @@ export function PreviewModal({
     }
   }, [playing, isVideoShowcase, restartKey, muted]);
 
+  useEffect(() => {
+    const video = introVideoRef.current;
+    if (!video) return;
+
+    if (playing && isIntro) {
+      void video.play().catch((error) => console.warn("Intro video could not start.", error));
+    } else {
+      video.pause();
+    }
+  }, [playing, isIntro, restartKey, muted]);
+
+  useEffect(() => {
+    const video = introVideoRef.current;
+    if (!video || !isIntro) return;
+    const targetTime = timelineElapsed / 1000;
+    if (Math.abs(video.currentTime - targetTime) > 0.3) {
+      video.currentTime = targetTime;
+    }
+  }, [timelineElapsed, isIntro]);
+
   const restart = () => {
     if (recording) return;
     audioRef.current?.pause();
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       audioRef.current.load();
+    }
+    if (introVideoRef.current) {
+      introVideoRef.current.currentTime = 0;
     }
     setTimelineElapsed(0);
     setRestartKey((value) => value + 1);
@@ -1173,9 +1456,10 @@ export function PreviewModal({
       ];
       const preloadedImgs = await preloadImages(allPhotoUrls.filter(Boolean));
       const preloadedVehicles = await preloadVehicleImages();
-      const preloadedVideos = await preloadVideos(
-        legSchedule.flatMap((schedule) => (schedule.video ? [schedule.video.url] : []))
-      );
+      const preloadedVideos = await preloadVideos([
+        INTRO_VIDEO_URL,
+        ...legSchedule.flatMap((schedule) => (schedule.video ? [schedule.video.url] : []))
+      ]);
       let activeExportVideoUrl: string | null = null;
 
     const canvas = document.createElement("canvas");
@@ -1189,6 +1473,17 @@ export function PreviewModal({
     }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
+
+    // Put the branded intro onto the canvas before its stream is recorded.
+    // This guarantees the first captured frame is the opening card, never a
+    // blank canvas while the animation loop is scheduling its first frame.
+    drawBrandingCard(
+      ctx,
+      preloadedImgs.get(BRAND_LOGO_URL),
+      "Your journey starts here",
+      `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
+      1
+    );
 
     const canvasStream = canvas.captureStream(EXPORT_FRAME_RATE);
     const audioContext = new AudioContext();
@@ -1216,7 +1511,7 @@ export function PreviewModal({
 
     const audioBuffers = new Map<string, AudioBuffer>();
     await Promise.all(
-      [BACKGROUND_MUSIC_URL, ...videoWindows.map((window) => window.videoUrl)].map(async (url) => {
+      [BACKGROUND_MUSIC_URL, INTRO_VIDEO_URL, ...videoWindows.map((window) => window.videoUrl)].map(async (url) => {
         try {
           audioBuffers.set(url, await getAudioBuffer(audioContext, url));
         } catch (error) {
@@ -1251,6 +1546,14 @@ export function PreviewModal({
       source.start(musicStart);
       source.stop(musicEnd);
     }
+    const introAudio = audioBuffers.get(INTRO_VIDEO_URL);
+    if (introAudio) {
+      const source = audioContext.createBufferSource();
+      source.buffer = introAudio;
+      source.connect(audioDestination);
+      source.start(audioStartTime);
+      source.stop(audioStartTime + INTRO_DURATION_MS / 1000);
+    }
     for (const window of videoWindows) {
       const clipAudio = audioBuffers.get(window.videoUrl);
       if (!clipAudio) continue;
@@ -1271,7 +1574,7 @@ export function PreviewModal({
     ]);
     const recorder = new MediaRecorder(combinedStream, {
       mimeType: mime,
-      videoBitsPerSecond: 14000000,
+      videoBitsPerSecond: 8000000,
     });
     const chunks: BlobPart[] = [];
 
@@ -1281,7 +1584,7 @@ export function PreviewModal({
       recorder.onerror = () => reject(new Error("Video rendering failed."));
     });
 
-    recorder.start();
+    recorder.start(1000);
 
     const length = totalPlaybackDuration;
     const started = performance.now();
@@ -1289,10 +1592,10 @@ export function PreviewModal({
     let lastRenderedAt = started - frameInterval;
 
     await new Promise<void>((resolve) => {
-      const anim = (now: number) => {
+      const anim = async (now: number) => {
         const elapsed = now - started;
 
-        if (elapsed < length && now - lastRenderedAt < frameInterval) {
+        if (elapsed < length && now - lastRenderedAt < frameInterval - 4) {
           requestAnimationFrame(anim);
           return;
         }
@@ -1329,22 +1632,44 @@ export function PreviewModal({
         const recPhotoElapsed = isRecPhotoPhase ? Math.max(0, recArrivalElapsed - recVideoDurationMs) : 0;
         const recArrivalDuration = Math.max(0, (recSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS);
         const recArrivalOpacity = isArrival
-          ? getFadeOpacity(recElapsedInLeg - VEHICLE_LEG_DURATION_MS, recArrivalDuration, FADE_TRANSITION_MS, FADE_TRANSITION_MS)
+          ? getFadeOpacity(recElapsedInLeg - VEHICLE_LEG_DURATION_MS, recArrivalDuration, 50, FADE_TRANSITION_MS)
           : 0;
-        const exportVideo = recVideo ? preloadedVideos.get(recVideo.url) : undefined;
-        if (recVideo?.url !== activeExportVideoUrl) {
+        const isRecIntro = elapsed < INTRO_DURATION_MS;
+        const introExportVideo = preloadedVideos.get(INTRO_VIDEO_URL);
+        const currentActiveVideoUrl = isRecIntro ? INTRO_VIDEO_URL : (recVideo?.url ?? null);
+        const currentActiveVideo = isRecIntro ? introExportVideo : (recVideo ? preloadedVideos.get(recVideo.url) : undefined);
+
+        if (currentActiveVideoUrl !== activeExportVideoUrl) {
           if (activeExportVideoUrl) preloadedVideos.get(activeExportVideoUrl)?.pause();
-          activeExportVideoUrl = recVideo?.url ?? null;
-          if (exportVideo) {
-            exportVideo.currentTime = 0;
-            exportVideo.playbackRate = 1;
-            void exportVideo.play().catch(() => undefined);
+          activeExportVideoUrl = currentActiveVideoUrl;
+          if (currentActiveVideo) {
+            currentActiveVideo.currentTime = isRecIntro ? elapsed / 1000 : 0;
+            currentActiveVideo.playbackRate = 1;
+            void currentActiveVideo.play().catch(() => undefined);
           }
         }
+        if (isRecIntro && introExportVideo) {
+          const targetSec = elapsed / 1000;
+          if (Math.abs(introExportVideo.currentTime - targetSec) > 0.5) {
+            introExportVideo.currentTime = targetSec;
+          }
+        }
+        const exportVideo = !isRecIntro && recVideo ? preloadedVideos.get(recVideo.url) : undefined;
         const photoIdx = isRecPhotoPhase
           ? Math.min(totalPhotos - 1, Math.floor(recPhotoElapsed / PHOTO_DURATION_MS))
           : 0;
         const curSec = Math.floor(elapsed / 1000);
+
+        const recTravelProgress = Math.min(1, recElapsedInLeg / VEHICLE_LEG_DURATION_MS);
+        const recMapProgress = Math.min(
+          1,
+          (legIdx + (isArrival ? 0.999999 : recTravelProgress * 0.55)) / totalLegs
+        );
+
+        const globeHandle = mapboxGlobeRef.current;
+        if (globeHandle && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
+          await globeHandle.renderFrame(recMapProgress);
+        }
 
         const recCollageElapsed = Math.max(0, elapsed - collageStartTime);
         const recCurrentBatchIndex = 0;
@@ -1359,7 +1684,6 @@ export function PreviewModal({
         }
 
         if (!isArrival && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
-          const globeHandle = mapboxGlobeRef.current;
           const liveMap = globeHandle?.getMap();
           const vehicleState = globeHandle?.getVehicleState();
 
@@ -1491,28 +1815,38 @@ export function PreviewModal({
           ctx.save();
           ctx.globalAlpha = recArrivalOpacity;
 
-          if (recVideo && exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            const popMs = 400;
-            const t = Math.min(1, Math.max(0, recArrivalElapsed / popMs));
-            const c1 = 1.35;
-            const c3 = c1 + 1;
-            const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-            const scale = 0.35 + 0.65 * springEased;
-            const dw = 1080 * scale, dh = 1080 * scale;
-            const dx = (1080 - dw) / 2, dy = (1080 - dh) / 2;
-            ctx.drawImage(exportVideo, dx, dy, dw, dh);
+          const isStopVideo = Boolean(recSchedule?.video);
+
+          if (isStopVideo) {
+            if (exportVideo && exportVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+              const popMs = 400;
+              const t = Math.min(1, Math.max(0, recArrivalElapsed / popMs));
+              const c1 = 1.35;
+              const c3 = c1 + 1;
+              const springEased = t === 1 ? 1 : 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+              const scale = 0.35 + 0.65 * springEased;
+              const dw = 1080 * scale, dh = 1080 * scale;
+              const dx = (1080 - dw) / 2, dy = (1080 - dh) / 2;
+              ctx.drawImage(exportVideo, dx, dy, dw, dh);
+            } else if (exportVideo) {
+              ctx.drawImage(exportVideo, 0, 0, 1080, 1080);
+            } else {
+              const activePhotoUrl = arrivalImages[0] || arrivalStop.imageUrl || "";
+              const activeImg = preloadedImgs.get(activePhotoUrl);
+              if (activeImg) {
+                ctx.drawImage(activeImg, 0, 0, 1080, 1080);
+              } else {
+                ctx.fillStyle = "#030e18";
+                ctx.fillRect(0, 0, 1080, 1080);
+              }
+            }
           } else {
             const activePhotoUrl = arrivalImages[photoIdx] || arrivalStop.imageUrl || "";
             const activeImg = preloadedImgs.get(activePhotoUrl);
             const photoElapsed = recPhotoElapsed - photoIdx * PHOTO_DURATION_MS;
+            const photoEffectIndex = legIdx * 3 + photoIdx;
 
-            const transitionProgress = Math.min(1, Math.max(0, photoElapsed / PHOTO_TRANSITION_MS));
-            const easedProgress = 1 - Math.pow(1 - transitionProgress, 3);
-            const transitionDirection = getPhotoTransitionDirection(photoIdx);
-            const dx = transitionDirection === "left" ? -1080 * (1 - easedProgress) : transitionDirection === "right" ? 1080 * (1 - easedProgress) : 0;
-            const dy = transitionDirection === "top" ? -1080 * (1 - easedProgress) : 0;
-
-            if (photoIdx > 0 && photoElapsed < PHOTO_TRANSITION_MS) {
+            if (photoIdx > 0 && photoElapsed < 550) {
               const prevPhotoUrl = arrivalImages[photoIdx - 1] || "";
               const prevImg = preloadedImgs.get(prevPhotoUrl);
               if (prevImg) {
@@ -1521,26 +1855,18 @@ export function PreviewModal({
             }
 
             if (activeImg) {
-              ctx.drawImage(activeImg, dx, dy, 1080, 1080);
+              drawCinematicPhotoOnCanvas(ctx, activeImg, photoEffectIndex, photoIdx, photoElapsed);
             } else {
               ctx.fillStyle = "#030e18";
               ctx.fillRect(0, 0, 1080, 1080);
             }
-
-            if (photoElapsed < 100) {
-              const flashAlpha = (1 - photoElapsed / 100) * 0.35;
-              ctx.save();
-              ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
-              ctx.fillRect(0, 0, 1080, 1080);
-              ctx.restore();
-            }
           }
 
-          const gradient = ctx.createLinearGradient(0, 800, 0, 1080);
+          const gradient = ctx.createLinearGradient(0, 780, 0, 1080);
           gradient.addColorStop(0, "rgba(3, 16, 29, 0)");
-          gradient.addColorStop(1, "rgba(3, 16, 29, 0.88)");
+          gradient.addColorStop(1, "rgba(3, 16, 29, 0.92)");
           ctx.fillStyle = gradient;
-          ctx.fillRect(0, 800, 1080, 280);
+          ctx.fillRect(0, 780, 1080, 300);
 
           ctx.textAlign = "left";
           ctx.textBaseline = "alphabetic";
@@ -1558,12 +1884,30 @@ export function PreviewModal({
           ctx.fillStyle = "#d9f4ff";
           ctx.font = "700 19px system-ui, sans-serif";
           ctx.fillText(
-            recVideo
+            isStopVideo
               ? `${arrivalStop.country} · Travel video`
               : `${arrivalStop.country} · Photo ${photoIdx + 1} of ${totalPhotos}`,
             60,
             996
           );
+
+          if (!isStopVideo) {
+            const photoEffectIndex = legIdx * 3 + photoIdx;
+            const eff = getCinematicEffect(photoEffectIndex);
+            const badgeText = eff.badge;
+            ctx.save();
+            ctx.font = "800 12px system-ui, sans-serif";
+            const badgeW = ctx.measureText(badgeText).width + 36;
+            drawRoundedRect(ctx, 60, 1012, badgeW, 26, 13, "rgba(2, 9, 20, 0.75)", eff.accentColor, 1.5);
+            ctx.fillStyle = eff.accentColor;
+            ctx.beginPath();
+            ctx.arc(74, 1025, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#e8f5ff";
+            ctx.textBaseline = "middle";
+            ctx.fillText(badgeText, 85, 1025);
+            ctx.restore();
+          }
 
           ctx.restore();
         }
@@ -1599,14 +1943,22 @@ export function PreviewModal({
         }
 
         if (elapsed < INTRO_DURATION_MS) {
-          const introFade = getFadeOpacity(elapsed, INTRO_DURATION_MS);
-          drawBrandingCard(
-            ctx,
-            preloadedImgs.get(BRAND_LOGO_URL),
-            "Your journey starts here",
-            `${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`,
-            introFade
-          );
+          const introFade = getFadeOpacity(elapsed, INTRO_DURATION_MS, 0, 300);
+          ctx.save();
+          ctx.fillStyle = "#030e18";
+          ctx.fillRect(0, 0, 1080, 1080);
+          if (introExportVideo && introExportVideo.readyState >= 2) {
+            ctx.globalAlpha = introFade;
+            const vw = introExportVideo.videoWidth || 1280;
+            const vh = introExportVideo.videoHeight || 720;
+            const scale = Math.max(1080 / vw, 1080 / vh);
+            const dw = vw * scale;
+            const dh = vh * scale;
+            const dx = (1080 - dw) / 2;
+            const dy = (1080 - dh) / 2;
+            ctx.drawImage(introExportVideo, dx, dy, dw, dh);
+          }
+          ctx.restore();
         }
 
         if (elapsed >= routeMapStartTime && elapsed < summaryStartTime) {
@@ -1807,7 +2159,6 @@ export function PreviewModal({
             style={{ opacity: arrivalMediaOpacity }}
             aria-label={`${destination.name} travel photo`}
           >
-            <div className="micro-flash-overlay" key={`flash-${currentLegIndex}-${photoIndex}`} />
             {(activeSchedule?.images.length ? activeSchedule.images : [destination.imageUrl || ""]).map((url, idx) => {
               if (!url) return null;
               const isCurrent = idx === photoIndex;
@@ -1826,17 +2177,33 @@ export function PreviewModal({
                     height: "100%",
                     objectFit: "cover",
                     zIndex: isCurrent ? 2 : 1,
-                    animation: isCurrent ? getPhotoTransitionAnimation(photoIndex) : "none",
+                    animation: isCurrent
+                      ? getPhotoTransitionAnimation(currentLegIndex * 3 + photoIndex, photoIndex)
+                      : "none",
                   }}
                 />
               );
             })}
+            <CinematicPhotoOverlay
+              key={`photo-effect-${currentLegIndex}-${photoIndex}`}
+              effectIndex={currentLegIndex * 3 + photoIndex}
+            />
             <div className="arrival-photo-caption" style={{ position: "relative", zIndex: 3 }}>
               <span>ARRIVED · STOP {currentLegIndex + 2} OF {totalLegs + 1}</span>
               <h2>{destination.name}</h2>
               <p>
                 {destination.country} · Photo {photoIndex + 1} of {activeSchedule?.photoCount ?? 1} · 2 seconds
               </p>
+              <div
+                className="cinematic-effect-badge"
+                style={{ borderColor: getCinematicEffect(currentLegIndex * 3 + photoIndex).accentColor }}
+              >
+                <span
+                  className="badge-dot"
+                  style={{ backgroundColor: getCinematicEffect(currentLegIndex * 3 + photoIndex).accentColor }}
+                />
+                <span>{getCinematicEffect(currentLegIndex * 3 + photoIndex).badge}</span>
+              </div>
             </div>
           </section>
         )}
@@ -1847,22 +2214,6 @@ export function PreviewModal({
             style={{ opacity: arrivalMediaOpacity }}
             aria-label={`${destination.name} travel video`}
           >
-            <div className="micro-flash-overlay" key={`flash-${currentLegIndex}`} />
-            {activePhotoUrl ? (
-              <img
-                src={activePhotoUrl}
-                alt={`${destination.name} travel moment`}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  filter: "brightness(0.55) saturate(0.8)",
-                  zIndex: 0,
-                }}
-              />
-            ) : null}
             <video
               ref={videoRef}
               key={activeSchedule.video.url}
@@ -1891,18 +2242,19 @@ export function PreviewModal({
         )}
 
         {isIntro && (
-          <div
-            className="video-branding-card"
+          <section
+            className="intro-video-fullscreen"
             style={{ opacity: introOpacity, transition: "opacity 0.05s linear" }}
-            aria-live="polite"
+            aria-label="Journey intro video"
           >
-            <div className="video-branding-content">
-              <img src={BRAND_LOGO_URL} alt="Roamly Studio logo" />
-              <span>Before We Die</span>
-              <strong>Your journey starts here</strong>
-              <small>{`${locations[0]?.name ?? "Start"} to ${locations.at(-1)?.name ?? "Destination"}`}</small>
-            </div>
-          </div>
+            <video
+              ref={introVideoRef}
+              src={INTRO_VIDEO_URL}
+              autoPlay
+              playsInline
+              muted={muted}
+            />
+          </section>
         )}
 
         <div
@@ -2271,7 +2623,7 @@ export function PreviewModal({
             </button>
             <span>
               {isIntro
-                ? "Intro · Before We Die"
+                ? "Intro · Travel Video"
                 : isRouteMap
                   ? "Route Overview · 2D Map"
                   : isSummary

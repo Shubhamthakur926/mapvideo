@@ -13,7 +13,10 @@ import {
   VEHICLE_LEG_DURATION_MS,
 } from "../constants/preview.constants";
 import type { LegScheduleItem, PhotoItem } from "../types/preview.types";
+import { isNewCountry, getFlagUrl } from "../../flagUtils";
+import { FLAG_TOTAL_DURATION_MS } from "../../FlagArrivalOverlay";
 import { getFadeOpacity } from "../utils/previewFormatters";
+
 
 interface UsePreviewTimelineParams {
   locations: Location[];
@@ -38,6 +41,10 @@ export function usePreviewTimeline({
 }: UsePreviewTimelineParams) {
   const [clipDurations, setClipDurations] = useState<Record<string, number>>({});
   const [introDurationMs, setIntroDurationMs] = useState<number>(DEFAULT_INTRO_DURATION_MS);
+
+  // Flag arrival info is computed deterministically in the useMemo below.
+  // No useState / useRef / useEffect needed — see `legArrivalInfo` + `flagOverlay`.
+
 
   useEffect(() => {
     const media = document.createElement("video");
@@ -113,6 +120,10 @@ export function usePreviewTimeline({
         const photoCount = Math.max(1, images.length);
         const videoDurationMs = video ? (clipDurations[video.url] ?? video.duration ?? 5) * 1000 : 0;
         const photosDurationMs = photoCount * PHOTO_DURATION_MS;
+        const prevCity = locations[index] ?? null;
+        const showFlag = isNewCountry(stop, prevCity);
+        const flagDurationMs = showFlag ? FLAG_TOTAL_DURATION_MS : 0;
+
         return {
           index,
           stop,
@@ -121,11 +132,41 @@ export function usePreviewTimeline({
           photoCount,
           videoDurationMs,
           photosDurationMs,
-          duration: VEHICLE_LEG_DURATION_MS + videoDurationMs + photosDurationMs,
+          showFlag,
+          flagDurationMs,
+          duration: VEHICLE_LEG_DURATION_MS + flagDurationMs + videoDurationMs + photosDurationMs,
         };
       }),
     [locations, clipDurations]
   );
+
+  /**
+   * legArrivalInfo — precomputed per-leg flag data.
+   *
+   * For each leg i, `arrivalStartJourneyMs` is the journeyElapsed value at
+   * which the arrival phase begins (i.e. after VEHICLE_LEG_DURATION_MS of
+   * travel for that leg). This lets us compute a pure `flagElapsedMs` for
+   * the current leg without any side-effects or refs.
+   */
+  const legArrivalInfo = useMemo(() => {
+    let offset = 0;
+    return legSchedule.map((schedule, i) => {
+      // Absolute journeyElapsed ms when this leg's arrival phase starts
+      const arrivalStartJourneyMs = offset + VEHICLE_LEG_DURATION_MS;
+      offset += schedule.duration;
+
+      const destCity = locations[i + 1] ?? null;
+      const showFlag = Boolean(schedule.showFlag);
+
+      return {
+        arrivalStartJourneyMs,
+        showFlag,
+        flagUrl:     showFlag && destCity ? getFlagUrl(destCity.country) : null,
+        countryName: destCity?.country ?? "",
+        cityName:    destCity?.name    ?? "",
+      };
+    });
+  }, [legSchedule, locations]);
 
   const totalJourneyDuration = legSchedule.reduce((total, leg) => total + leg.duration, 0);
   const totalPlaybackDuration =
@@ -180,29 +221,33 @@ export function usePreviewTimeline({
   const currentLegIndex = activeSchedule?.index ?? 0;
   const destination = activeSchedule?.stop ?? locations.at(-1)!;
   const isArrivalPhase = elapsedInLeg >= VEHICLE_LEG_DURATION_MS;
+  const flagDurationMs = activeSchedule?.flagDurationMs ?? 0;
+  const mediaPhaseStartMs = VEHICLE_LEG_DURATION_MS + flagDurationMs;
+  const isMediaPhase = elapsedInLeg >= mediaPhaseStartMs;
+
   const videoDurationMs = activeSchedule?.videoDurationMs ?? 0;
   const isVideoScheduled =
-    isArrivalPhase && videoDurationMs > 0 && elapsedInLeg - VEHICLE_LEG_DURATION_MS < videoDurationMs;
+    isMediaPhase && videoDurationMs > 0 && elapsedInLeg - mediaPhaseStartMs < videoDurationMs;
   const isVideoShowcase =
     isVideoScheduled &&
     Boolean(activeSchedule?.video) &&
     !unavailableVideos.includes(activeSchedule?.video?.url ?? "");
-  const isPhotoShowcase = isArrivalPhase && (!isVideoShowcase || !activeSchedule?.video);
+  const isPhotoShowcase = isMediaPhase && (!isVideoShowcase || !activeSchedule?.video);
   const isMediaShowcase = isArrivalPhase;
   const arrivalMediaDuration = Math.max(
     0,
-    (activeSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS
+    (activeSchedule?.duration ?? mediaPhaseStartMs) - mediaPhaseStartMs
   );
-  const arrivalMediaOpacity = isArrivalPhase
+  const arrivalMediaOpacity = isMediaPhase
     ? getFadeOpacity(
-        elapsedInLeg - VEHICLE_LEG_DURATION_MS,
+        elapsedInLeg - mediaPhaseStartMs,
         arrivalMediaDuration,
         FADE_TRANSITION_MS,
         FADE_TRANSITION_MS
       )
     : 0;
   const travelProgress = Math.min(1, elapsedInLeg / VEHICLE_LEG_DURATION_MS);
-  const photoElapsedInLeg = Math.max(0, elapsedInLeg - VEHICLE_LEG_DURATION_MS - videoDurationMs);
+  const photoElapsedInLeg = Math.max(0, elapsedInLeg - mediaPhaseStartMs - videoDurationMs);
   const photoIndex = isPhotoShowcase
     ? Math.min(
         Math.max(0, (activeSchedule?.photoCount ?? 1) - 1),
@@ -248,6 +293,40 @@ export function usePreviewTimeline({
     }
   }, [playing, recording, timelineElapsed, totalPlaybackDuration, setPlaying]);
 
+  /* -----------------------------------------------------------------------
+   * Flag Overlay — PURE DERIVED STATE (no useEffect, no setTimeout, no gate)
+   *
+   * `flagOverlay` is a pure function of `journeyElapsed` and `legArrivalInfo`.
+   * This means it is frame-exact in BOTH:
+   *   • Live playback  (setInterval drives timelineElapsed)
+   *   • Frame export   (useVideoExport calls setTimelineElapsed synthetically)
+   *
+   * Logic:
+   *   activeFlagInfo = the precomputed flag info for the current leg
+   *   flagElapsedMs  = journeyElapsed − arrivalStartJourneyMs of that leg
+   *   visible when:  flagElapsedMs ∈ [0, FLAG_TOTAL_DURATION_MS)
+   *                  AND the leg requires a flag (showFlag = true)
+   *                  AND we are in the journey phase
+   * ----------------------------------------------------------------------- */
+  const activeFlagInfo = legArrivalInfo[currentLegIndex];
+  const flagElapsedMs = activeFlagInfo
+    ? journeyElapsed - activeFlagInfo.arrivalStartJourneyMs
+    : -1;
+
+  const flagOverlay = {
+    visible: Boolean(
+      isJourney &&
+      activeFlagInfo?.showFlag &&
+      flagElapsedMs >= 0 &&
+      flagElapsedMs < FLAG_TOTAL_DURATION_MS
+    ),
+    flagUrl:     activeFlagInfo?.flagUrl     ?? null,
+    countryName: activeFlagInfo?.countryName ?? "",
+    cityName:    activeFlagInfo?.cityName    ?? "",
+    /** How far into the animation sequence we are (0 → FLAG_TOTAL_DURATION_MS) */
+    elapsedMs:   Math.max(0, flagElapsedMs),
+  };
+
   return {
     INTRO_DURATION_MS,
     allPhotos,
@@ -292,6 +371,8 @@ export function usePreviewTimeline({
     totalTripDistance,
     elapsedSec,
     journeyIsPlaying,
+    // Flag arrival — derived, no side-effects
+    flagOverlay,
   };
 }
 

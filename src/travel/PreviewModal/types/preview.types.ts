@@ -29,6 +29,8 @@ export interface LegScheduleItem {
   photoCount: number;
   videoDurationMs: number;
   photosDurationMs: number;
+  showFlag?: boolean;
+  flagDurationMs?: number;
   duration: number;
 }
 

@@ -584,3 +584,147 @@ export function drawRouteOverviewFrame(options: {
   }
 }
 
+/**
+ * Draw country flag arrival overlay directly onto export canvas.
+ * Exactly mirrors the visual design of FlagArrivalOverlay.tsx.
+ */
+export function drawFlagArrivalCanvas(
+  ctx: CanvasRenderingContext2D,
+  flagImg: HTMLImageElement | undefined,
+  countryName: string,
+  cityName: string,
+  elapsedMs: number,
+  canvasWidth = 1080,
+  canvasHeight = 1080
+) {
+  const FADE_IN_MS = 150;
+  const FLY_IN_MS = 400;
+  const WAVE_HOLD_MS = 1800;
+  const WIPE_OUT_MS = 390;
+  const TOTAL_MS = FADE_IN_MS + FLY_IN_MS + WAVE_HOLD_MS + WIPE_OUT_MS;
+
+  if (elapsedMs < 0 || elapsedMs >= TOTAL_MS) return;
+
+  const t = Math.max(0, Math.min(TOTAL_MS, elapsedMs));
+  const easeOutCubic = (val: number) => 1 - Math.pow(1 - Math.min(1, val), 3);
+  const easeInCubic = (val: number) => Math.min(1, val) * Math.min(1, val) * Math.min(1, val);
+
+  const FLY_END = FLY_IN_MS;
+  const WAVE_END = FLY_END + WAVE_HOLD_MS;
+
+  const backdropOpacity = easeOutCubic(t / FADE_IN_MS);
+
+  let flagTranslateY = 0;
+  let flagTranslateX = 0;
+  let flagOpacity = 1;
+  let isWaving = false;
+
+  if (t <= FLY_END) {
+    const progress = easeOutCubic(t / FLY_IN_MS);
+    flagTranslateY = (1 - progress) * -70;
+    flagOpacity = progress;
+  } else if (t <= WAVE_END) {
+    flagTranslateY = 0;
+    flagOpacity = 1;
+    isWaving = true;
+  } else {
+    const progress = easeInCubic((t - WAVE_END) / WIPE_OUT_MS);
+    flagTranslateX = progress * (canvasWidth * 0.8);
+    flagOpacity = 1 - progress;
+    isWaving = false;
+  }
+
+  const subtitleProgress = isWaving
+    ? Math.min(1, (t - FLY_END) / 300)
+    : t > WAVE_END
+    ? Math.max(0, 1 - easeInCubic((t - WAVE_END) / WIPE_OUT_MS))
+    : 0;
+
+  ctx.save();
+
+  // Backdrop overlay
+  ctx.fillStyle = `rgba(2, 8, 16, ${0.74 * backdropOpacity})`;
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  const flagW = 500;
+  const flagH = 330;
+  const flagCenterX = canvasWidth / 2 + flagTranslateX;
+  const flagCenterY = canvasHeight / 2 - 40 + flagTranslateY;
+
+  // Flag container
+  if (flagOpacity > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = flagOpacity;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.88)";
+    ctx.shadowBlur = 48;
+    ctx.shadowOffsetY = 16;
+
+    const flagX = flagCenterX - flagW / 2;
+    const flagY = flagCenterY - flagH / 2;
+
+    drawRoundedRect(ctx, flagX, flagY, flagW, flagH, 12, "#030e18", "rgba(255, 255, 255, 0.12)", 2);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    if (flagImg && flagImg.complete && flagImg.naturalWidth > 0) {
+      drawRoundedImage(ctx, flagImg, flagX, flagY, flagW, flagH, 12);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "80px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🌍", flagCenterX, flagCenterY);
+    }
+    ctx.restore();
+  }
+
+  // Subtitle card
+  if (subtitleProgress > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = subtitleProgress;
+    const subY = flagCenterY + flagH / 2 + 38 + (1 - subtitleProgress) * 18;
+
+    // Badge pill
+    const badgeText = `🌏 Welcome to ${countryName.toUpperCase()}`;
+    ctx.font = "800 13px system-ui, sans-serif";
+    const badgeW = ctx.measureText(badgeText).width + 42;
+    const badgeH = 32;
+    const badgeX = canvasWidth / 2 - badgeW / 2;
+    const badgeY = subY;
+
+    drawRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, 16, "rgba(3, 16, 29, 0.9)", "rgba(56, 189, 248, 0.6)", 1.5);
+
+    // Cyan dot
+    ctx.beginPath();
+    ctx.arc(badgeX + 18, badgeY + badgeH / 2, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#38bdf8";
+    ctx.shadowColor = "#38bdf8";
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = "#38bdf8";
+    ctx.font = "800 13px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(badgeText, badgeX + 28, badgeY + badgeH / 2);
+
+    // City Name
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = "700 48px Georgia, 'Times New Roman', serif";
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 4;
+    ctx.fillText(cityName, canvasWidth / 2, badgeY + badgeH + 12);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+

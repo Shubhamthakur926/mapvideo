@@ -4,6 +4,7 @@ import { getLocationImages, type Location, type Transport } from "./types";
 import { createVehicle3DElement, updateVehicle3D } from "./Vehicle3D";
 import { getPhotoTransitionAnimation, CinematicPhotoOverlay, getCinematicEffect } from "./CinematicEffects";
 
+
 export interface MapboxGlobeHandle {
   getMap: () => mapboxgl.Map | null;
   getVehicleState: () => {
@@ -723,6 +724,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapStyle, setMapStyle] = useState<string>("mapbox://styles/mapbox/satellite-streets-v12");
 
+
   const totalLegs = Math.max(1, locations.length - 1);
   const currentProgress = externalProgress !== undefined ? externalProgress : internalProgress;
   const legDistances = useMemo(
@@ -807,6 +809,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
       maxZoom: 12,
       maxTileCacheSize: 200,
       renderWorldCopies: false,
+
     });
 
     mapRef.current = map;
@@ -1570,6 +1573,7 @@ export const MapboxGlobe = forwardRef<MapboxGlobeHandle, Props>(function MapboxG
           (replaces the old floating summary card entirely — no box, no grid,
           no thumbnails: the photo itself fills the frame). */}
       {!hideOverlays && isArrival && arrivalStop && !arrivalStop.videoUrl && (
+
         <div
           style={{
             position: "absolute",

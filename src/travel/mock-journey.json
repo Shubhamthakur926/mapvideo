@@ -13,34 +13,18 @@
         "https://images.unsplash.com/photo-1548013146-72479768bada?w=1200&auto=format&fit=crop&q=85"
       ]
     },
-    {
+       {
       "name": "Mumbai",
       "country": "India",
       "code": "BOM",
       "lat": 19.076,
       "lng": 72.8777,
       "transport": "flight",
-      "videoUrl": "/videos/mumbai.mp4",
       "description": "Gateway of India & Marine Drive coast",
       "images": [
         "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1566552881560-0be862a7c445?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1595658658481-d53d3f999875?w=1200&auto=format&fit=crop&q=85"
-      ]
-    },
-    {
-      "name": "Goa Beach",
-      "country": "India",
-      "code": "GOI",
-      "lat": 15.2993,
-      "lng": 74.124,
-      "transport": "bike",
-      "videoUrl": "/videos/goa.webm",
-      "description": "Palolem Beach & tropical palm shores",
-      "images": [
-        "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=1200&auto=format&fit=crop&q=85"
       ]
     },
     {
@@ -53,24 +37,10 @@
       "description": "Burj Khalifa & futuristic desert marina",
       "images": [
         "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1518684079-3c830dcef090?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1580674684081-7617fbf3d745?w=1200&auto=format&fit=crop&q=85"
+        "https://images.unsplash.com/photo-1518684079-3c830dcef090?w=1200&auto=format&fit=crop&q=85"
       ]
     },
-    {
-      "name": "Naples",
-      "country": "Italy",
-      "code": "NAP",
-      "lat": 40.8518,
-      "lng": 14.2681,
-      "transport": "flight",
-      "description": "Gulf of Naples & Mount Vesuvius coastline",
-      "images": [
-        "https://images.unsplash.com/photo-1534445867742-43195f401b6c?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1516483638261-f4dbaf036963?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?w=1200&auto=format&fit=crop&q=85"
-      ]
-    },
+
     {
       "name": "Rome",
       "country": "Italy",
@@ -81,7 +51,6 @@
       "description": "Colosseum & ancient Roman architecture",
       "images": [
         "https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=1200&auto=format&fit=crop&q=85",
-        "https://images.unsplash.com/photo-1529260830199-42c24126f198?w=1200&auto=format&fit=crop&q=85",
         "https://images.unsplash.com/photo-1531572753322-ad063cecc140?w=1200&auto=format&fit=crop&q=85"
       ]
     }

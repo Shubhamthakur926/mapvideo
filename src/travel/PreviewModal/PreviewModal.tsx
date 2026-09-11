@@ -17,6 +17,8 @@ import { usePreviewMedia } from "./hooks/usePreviewMedia";
 import { usePreviewTimeline } from "./hooks/usePreviewTimeline";
 import { useVideoExport } from "./hooks/useVideoExport";
 import type { PreviewModalProps } from "./types/preview.types";
+import { FlagArrivalOverlay } from "../FlagArrivalOverlay";
+
 
 export function PreviewModal({
   locations,
@@ -160,6 +162,19 @@ export function PreviewModal({
           />
         )}
 
+        {/* ── Country Flag Arrival Animation ─────────────────────────────
+             Controlled entirely by timeline.flagOverlay.elapsedMs — no
+             internal timers. Works identically in live playback AND export. */}
+        {timeline.flagOverlay.visible && (
+          <FlagArrivalOverlay
+            key={`flag-leg-${timeline.currentLegIndex}`}
+            flagUrl={timeline.flagOverlay.flagUrl}
+            countryName={timeline.flagOverlay.countryName}
+            cityName={timeline.flagOverlay.cityName}
+            elapsedMs={timeline.flagOverlay.elapsedMs}
+          />
+        )}
+
         {timeline.isJourney && timeline.isPhotoShowcase && !timeline.isVideoShowcase && (
           <ArrivalPhotoShowcase
             arrivalMediaOpacity={timeline.arrivalMediaOpacity}
@@ -170,6 +185,7 @@ export function PreviewModal({
             activeSchedule={timeline.activeSchedule}
           />
         )}
+
 
         {timeline.isJourney && timeline.isVideoShowcase && timeline.activeSchedule?.video && (
           <ArrivalVideoShowcase

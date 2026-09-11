@@ -22,6 +22,7 @@ import {
 import type { LegScheduleItem, PhotoItem } from "../types/preview.types";
 import {
   drawBrandingCard,
+  drawFlagArrivalCanvas,
   drawPhotoCollage,
   drawRoundedImage,
   drawRoundedRect,
@@ -38,6 +39,9 @@ import {
 import { formatTime, getFadeOpacity } from "../utils/previewFormatters";
 import { getCinematicEffect } from "../../CinematicEffects";
 import { getTripPhotoTransition, resetTripTransitionCache } from "../transitions";
+import { isNewCountry, getFlagUrl } from "../../flagUtils";
+import { FLAG_TOTAL_DURATION_MS } from "../../FlagArrivalOverlay";
+
 
 interface UseVideoExportParams {
   locations: Location[];
@@ -138,8 +142,17 @@ export function useVideoExport({
         return;
       }
 
+      const flagUrls = locations.map((loc, idx) => {
+        const prev = idx > 0 ? locations[idx - 1] : null;
+        if (loc && isNewCountry(loc, prev)) {
+          return getFlagUrl(loc.country) || "";
+        }
+        return "";
+      }).filter(Boolean);
+
       const allPhotoUrls = [
         ...locations.flatMap((loc) => [loc.imageUrl || "", ...getLocationImages(loc)]),
+        ...flagUrls,
         BRAND_LOGO_URL,
       ];
       const preloadedImgs = await preloadImages(allPhotoUrls.filter(Boolean));
@@ -183,7 +196,7 @@ export function useVideoExport({
       legSchedule.forEach((schedule, index) => {
         const legStart =
           INTRO_DURATION_MS + legSchedule.slice(0, index).reduce((sum, leg) => sum + leg.duration, 0);
-        const arrivalStart = legStart + VEHICLE_LEG_DURATION_MS;
+        const arrivalStart = legStart + VEHICLE_LEG_DURATION_MS + (schedule.flagDurationMs ?? 0);
         const arrivalEnd = legStart + schedule.duration;
         arrivalWindows.push({
           start: arrivalStart,
@@ -315,22 +328,28 @@ export function useVideoExport({
           const arrivalImages = recSchedule?.images || getLocationImages(arrivalStop);
           const totalPhotos = Math.max(1, recSchedule?.photoCount ?? arrivalImages.length);
           const recVideoDurationMs = recSchedule?.videoDurationMs ?? 0;
+          const recFlagDurationMs = recSchedule?.flagDurationMs ?? 0;
+          const recMediaPhaseStartMs = VEHICLE_LEG_DURATION_MS + recFlagDurationMs;
+          const isRecMediaPhase = recElapsedInLeg >= recMediaPhaseStartMs;
+
           const recArrivalElapsed = Math.max(0, recElapsedInLeg - VEHICLE_LEG_DURATION_MS);
+          const recMediaElapsed = Math.max(0, recElapsedInLeg - recMediaPhaseStartMs);
+
           const isRecVideoActive =
-            isArrival && recVideoDurationMs > 0 && recArrivalElapsed < recVideoDurationMs;
+            isRecMediaPhase && recVideoDurationMs > 0 && recMediaElapsed < recVideoDurationMs;
           const recVideo = isRecVideoActive && recSchedule?.video ? recSchedule.video : null;
           const isRecPhotoPhase =
-            isArrival && (!recSchedule?.video || recArrivalElapsed >= recVideoDurationMs);
+            isRecMediaPhase && (!recSchedule?.video || recMediaElapsed >= recVideoDurationMs);
           const recPhotoElapsed = isRecPhotoPhase
-            ? Math.max(0, recArrivalElapsed - recVideoDurationMs)
+            ? Math.max(0, recMediaElapsed - recVideoDurationMs)
             : 0;
           const recArrivalDuration = Math.max(
             0,
-            (recSchedule?.duration ?? VEHICLE_LEG_DURATION_MS) - VEHICLE_LEG_DURATION_MS
+            (recSchedule?.duration ?? recMediaPhaseStartMs) - recMediaPhaseStartMs
           );
-          const recArrivalOpacity = isArrival
+          const recArrivalOpacity = isRecMediaPhase
             ? getFadeOpacity(
-                recElapsedInLeg - VEHICLE_LEG_DURATION_MS,
+                recMediaElapsed,
                 recArrivalDuration,
                 50,
                 FADE_TRANSITION_MS
@@ -524,7 +543,7 @@ export function useVideoExport({
             ctx.restore();
           }
 
-          if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
+          if (isRecMediaPhase && arrivalStop && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
             ctx.save();
             ctx.globalAlpha = recArrivalOpacity;
 
@@ -632,6 +651,32 @@ export function useVideoExport({
 
             ctx.restore();
           }
+
+          // ── Country Flag Arrival Animation (Export Canvas Overlay) ────────
+          // Renders on top of arrival photo/video, exactly matching FlagArrivalOverlay
+          if (isArrival && arrivalStop && elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
+            const destCity = arrivalStop;
+            const prevCity = locations[legIdx] ?? null;
+            const isCountryChange = isNewCountry(destCity, prevCity);
+
+            if (isCountryChange) {
+              const flagElapsedMs = recArrivalElapsed;
+              if (flagElapsedMs >= 0 && flagElapsedMs < FLAG_TOTAL_DURATION_MS) {
+                const flagUrl = getFlagUrl(destCity.country);
+                const flagImg = flagUrl ? preloadedImgs.get(flagUrl) : undefined;
+                drawFlagArrivalCanvas(
+                  ctx,
+                  flagImg,
+                  destCity.country,
+                  destCity.name,
+                  flagElapsedMs,
+                  1080,
+                  1080
+                );
+              }
+            }
+          }
+
 
           if (elapsed >= journeyStartTime && elapsed < routeMapStartTime) {
             ctx.save();

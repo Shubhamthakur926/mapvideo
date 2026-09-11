@@ -12,6 +12,7 @@
     "@supabase/supabase-js": "^2.112.3",
     "@types/mapbox-gl": "^3.4.1",
     "@types/three": "^0.185.4",
+    "i18n-iso-countries": "^7.14.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.33.0",
     "mapbox-gl": "^3.29.0",

@@ -55,6 +55,7 @@ interface UseVideoExportParams {
   journeyStartTime: number;
   routeMapStartTime: number;
   summaryStartTime: number;
+  rapidPhotosStartTime: number;
   collageStartTime: number;
   outroStartTime: number;
   totalTripDistance: string;
@@ -85,6 +86,7 @@ export function useVideoExport({
   journeyStartTime,
   routeMapStartTime,
   summaryStartTime,
+  rapidPhotosStartTime,
   collageStartTime,
   outroStartTime,
   totalTripDistance,
@@ -743,7 +745,7 @@ export function useVideoExport({
             });
           }
 
-          if (elapsed >= summaryStartTime && elapsed < collageStartTime) {
+          if (elapsed >= summaryStartTime && elapsed < rapidPhotosStartTime) {
             const sumFade = getFadeOpacity(elapsed - summaryStartTime, SUMMARY_DURATION_MS);
             drawTravelSummaryCard({
               ctx,
@@ -755,6 +757,40 @@ export function useVideoExport({
               elapsedInSummary: elapsed - summaryStartTime,
               summaryDuration: SUMMARY_DURATION_MS,
             });
+          }
+
+          if (elapsed >= rapidPhotosStartTime && elapsed < collageStartTime) {
+            const rapidElapsed = elapsed - rapidPhotosStartTime;
+            const rapidPhotoIndex = Math.min(
+              allPhotos.length - 1,
+              Math.floor(rapidElapsed / PHOTO_DURATION_MS * (PHOTO_DURATION_MS / 450))
+            );
+            const currentPhoto = allPhotos[rapidPhotoIndex];
+            const img = currentPhoto ? preloadedImgs.get(currentPhoto.url) : null;
+            if (img) {
+              const rapidFade = getFadeOpacity(rapidElapsed, (allPhotos.length > 0 ? allPhotos.length * 450 : 0));
+              ctx.save();
+              ctx.globalAlpha = rapidFade;
+              ctx.fillStyle = "#030e18";
+              ctx.fillRect(0, 0, 1080, 1080);
+              const scale = Math.max(1080 / img.width, 1080 / img.height);
+              const dw = img.width * scale * 1.05; // slight zoom
+              const dh = img.height * scale * 1.05;
+              const dx = (1080 - dw) / 2;
+              const dy = (1080 - dh) / 2;
+              ctx.drawImage(img, dx, dy, dw, dh);
+              
+              ctx.fillStyle = "rgba(0,0,0,0.4)";
+              ctx.fillRect(0, 950, 1080, 130);
+              ctx.fillStyle = "#ffffff";
+              ctx.font = "700 46px Georgia, serif";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.shadowColor = "rgba(0,0,0,0.8)";
+              ctx.shadowBlur = 8;
+              ctx.fillText(currentPhoto.locationName, 540, 1015);
+              ctx.restore();
+            }
           }
 
           // Photo Collage Section with batching - FIXED with totalLocations parameter

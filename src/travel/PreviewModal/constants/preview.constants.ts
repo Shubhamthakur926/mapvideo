@@ -27,6 +27,7 @@ export const VEHICLE_LEG_DURATION_MS = 4000;
 export const PHOTO_DURATION_MS = 2000;
 export const PHOTO_TRANSITION_MS = 480;
 export const ROUTE_MAP_DURATION_MS = 3200;
+export const RAPID_PHOTO_DURATION_MS = 450;
 export const COLLAGE_DURATION_MS = 8000;
 export const COLLAGE_ENTRY_DURATION_MS = 800;
 export const COLLAGE_STAGGER_MS = 50;

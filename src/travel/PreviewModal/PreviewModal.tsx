@@ -12,6 +12,7 @@ import { OutroOverlay } from "./components/OutroOverlay";
 import { RecordingIndicator } from "./components/RecordingIndicator";
 import { RouteOverviewOverlay } from "./components/RouteOverviewOverlay";
 import { SummaryCardOverlay } from "./components/SummaryCardOverlay";
+import { RapidPhotosOverlay } from "./components/RapidPhotosOverlay";
 import { VideoControls } from "./components/VideoControls";
 import { usePreviewMedia } from "./hooks/usePreviewMedia";
 import { usePreviewTimeline } from "./hooks/usePreviewTimeline";
@@ -74,6 +75,7 @@ export function PreviewModal({
     journeyStartTime: timeline.journeyStartTime,
     routeMapStartTime: timeline.routeMapStartTime,
     summaryStartTime: timeline.summaryStartTime,
+    rapidPhotosStartTime: timeline.rapidPhotosStartTime,
     collageStartTime: timeline.collageStartTime,
     outroStartTime: timeline.outroStartTime,
     totalTripDistance: timeline.totalTripDistance,
@@ -228,6 +230,13 @@ export function PreviewModal({
             totalTripDistance={timeline.totalTripDistance}
           />
         )}
+
+        <RapidPhotosOverlay
+          isRapidPhotos={timeline.isRapidPhotos}
+          rapidPhotosOpacity={timeline.rapidPhotosOpacity}
+          allPhotos={timeline.allPhotos}
+          rapidPhotoIndex={timeline.rapidPhotoIndex}
+        />
 
         {timeline.isCollage && (
           <CollageOverlay

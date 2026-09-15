@@ -9,6 +9,7 @@ import {
   OUTRO_DURATION_MS,
   PHOTO_DURATION_MS,
   ROUTE_MAP_DURATION_MS,
+  RAPID_PHOTO_DURATION_MS,
   SUMMARY_DURATION_MS,
   VEHICLE_LEG_DURATION_MS,
 } from "../constants/preview.constants";
@@ -82,6 +83,7 @@ export function usePreviewTimeline({
   }, [locations]);
 
   const totalBatches = allPhotos.length > 0 ? 1 : 0;
+  const RAPID_PHOTOS_TOTAL_DURATION = allPhotos.length > 0 ? allPhotos.length * RAPID_PHOTO_DURATION_MS : 0;
   const COLLAGE_TOTAL_DURATION = allPhotos.length > 0 ? COLLAGE_DURATION_MS : 0;
 
   useEffect(() => {
@@ -174,6 +176,7 @@ export function usePreviewTimeline({
     totalJourneyDuration +
     ROUTE_MAP_DURATION_MS +
     SUMMARY_DURATION_MS +
+    RAPID_PHOTOS_TOTAL_DURATION +
     COLLAGE_TOTAL_DURATION +
     OUTRO_DURATION_MS;
   const effectiveDurationSec = totalPlaybackDuration / 1000;
@@ -181,16 +184,24 @@ export function usePreviewTimeline({
   const journeyStartTime = INTRO_DURATION_MS;
   const routeMapStartTime = journeyStartTime + totalJourneyDuration;
   const summaryStartTime = routeMapStartTime + ROUTE_MAP_DURATION_MS;
-  const collageStartTime = summaryStartTime + SUMMARY_DURATION_MS;
+  const rapidPhotosStartTime = summaryStartTime + SUMMARY_DURATION_MS;
+  const collageStartTime = rapidPhotosStartTime + RAPID_PHOTOS_TOTAL_DURATION;
   const outroStartTime = collageStartTime + COLLAGE_TOTAL_DURATION;
 
   const isIntro = timelineElapsed < journeyStartTime;
   const isJourney = timelineElapsed >= journeyStartTime && timelineElapsed < routeMapStartTime;
   const isRouteMap = timelineElapsed >= routeMapStartTime && timelineElapsed < summaryStartTime;
-  const isSummary = timelineElapsed >= summaryStartTime && timelineElapsed < collageStartTime;
+  const isSummary = timelineElapsed >= summaryStartTime && timelineElapsed < rapidPhotosStartTime;
+  const isRapidPhotos = timelineElapsed >= rapidPhotosStartTime && timelineElapsed < collageStartTime;
   const isCollage = timelineElapsed >= collageStartTime && timelineElapsed < outroStartTime;
   const isOutro = timelineElapsed >= outroStartTime;
 
+  const rapidPhotosElapsed = Math.max(0, timelineElapsed - rapidPhotosStartTime);
+  const rapidPhotoIndex = Math.min(
+    allPhotos.length - 1,
+    Math.floor(rapidPhotosElapsed / RAPID_PHOTO_DURATION_MS)
+  );
+  
   const collageElapsed = Math.max(0, timelineElapsed - collageStartTime);
   const currentBatchIndex = 0;
   const batchTransitionProgress = 0;
@@ -200,6 +211,7 @@ export function usePreviewTimeline({
     ? getFadeOpacity(timelineElapsed - routeMapStartTime, ROUTE_MAP_DURATION_MS)
     : 0;
   const summaryOpacity = isSummary ? getFadeOpacity(timelineElapsed - summaryStartTime, SUMMARY_DURATION_MS) : 0;
+  const rapidPhotosOpacity = isRapidPhotos ? getFadeOpacity(rapidPhotosElapsed, RAPID_PHOTOS_TOTAL_DURATION) : 0;
   const collageOpacity = isCollage ? getFadeOpacity(collageElapsed, COLLAGE_TOTAL_DURATION) : 0;
   const outroOpacity = isOutro ? getFadeOpacity(timelineElapsed - outroStartTime, OUTRO_DURATION_MS) : 0;
 
@@ -332,6 +344,7 @@ export function usePreviewTimeline({
     allPhotos,
     totalBatches,
     COLLAGE_TOTAL_DURATION,
+    RAPID_PHOTOS_TOTAL_DURATION,
     totalLegs,
     legSchedule,
     totalJourneyDuration,
@@ -340,20 +353,24 @@ export function usePreviewTimeline({
     journeyStartTime,
     routeMapStartTime,
     summaryStartTime,
+    rapidPhotosStartTime,
     collageStartTime,
     outroStartTime,
     isIntro,
     isJourney,
     isRouteMap,
     isSummary,
+    isRapidPhotos,
     isCollage,
     isOutro,
+    rapidPhotoIndex,
     collageElapsed,
     currentBatchIndex,
     batchTransitionProgress,
     introOpacity,
     routeMapOpacity,
     summaryOpacity,
+    rapidPhotosOpacity,
     collageOpacity,
     outroOpacity,
     internalProgress,

@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "roamly-vite",
   "private": true,
   "version": "0.1.0",
@@ -32,5 +33,20 @@
     "@vitejs/plugin-react": "latest",
     "typescript": "^5.0.0",
     "vite": "latest"
+=======
+  "name": "roamly-backend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "ffmpeg-static": "^5.0.0"
+>>>>>>> 963fb1ed663a0bc7c6f5e72e4e13d5c0c53807da
   }
 }
